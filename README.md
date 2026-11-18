@@ -33,7 +33,6 @@ The repository provides modular integration layers depending on whether you work
 | `scripts/prompt-enhancer/ide-extension/` | Antigravity IDE extension (`package.json`, `extension.js`, `enhance-ide-hook.js`, `install-ide-enhancer.ps1`) |
 | `scripts/prompt-enhancer/wrapper/` | Go ConPTY wrapper production source (`main.go`, `enhancer.go`, `composer.go`, `live_span.go`, `editor_bridge.go`, `renderer.go`, `span_commit.go`, `build.ps1`) |
 | `scripts/prompt-enhancer/` | Standalone engines (`prompt-enhancer.mjs`/`.ts`), fail-closed `hook.mjs`, `enhance.mjs`, and legacy daemon scripts (`daemon.ps1`, `manage-daemon.ps1`, `PromptEnhancerApp.cs`) |
-| `scripts/goa/activate-prompt-enhancer.ps1` | Transactional GOA activator (lock-checked backup + `File.Replace` rollback) |
 | `LICENSE` | MIT License |
 
 > **Note:** Test files/fixtures, subdirectory `README.md`s, local runbooks/captures, logs, compiled `.exe` binaries, and `.bak` files are excluded via `.gitignore`.
@@ -92,7 +91,7 @@ powershell -ExecutionPolicy Bypass -File scripts/prompt-enhancer/wrapper/build.p
 | `ANTIGRAVITY_EXTENSIONS_DIR` | `%USERPROFILE%\.antigravity-ide\extensions` | Target folder used by `install-ide-enhancer.ps1` (`-ExtensionRoot`). |
 | `ANTIGRAVITY_IDE_APP_ROOT` | Auto-detected | Target `resources\app` path for Antigravity IDE (`-IdeAppRoot`). |
 | `AGY_CONFIG_DIR` | `%USERPROFILE%\.gemini\config` | Target CLI config root used by `install-plugin.ps1`. |
-| `AGY_BIN_DIR` | `%LOCALAPPDATA%\agy\bin` | Target CLI binary directory used by `wrapper/build.ps1` & `activate-prompt-enhancer.ps1`. |
+| `AGY_BIN_DIR` | `%LOCALAPPDATA%\agy\bin` | Target CLI binary directory used by `wrapper/build.ps1`. |
 | `PROMPT_ENHANCER_CONFIG` | Plugin/script local config | Custom JSON config path for `hook.mjs` (see `plugins/prompt-enhancer/config.example.json`). |
 | `PROMPT_ENHANCER_MODE` | `hybrid` | `hybrid`, `llm`, or `local` (deterministic fallback). |
 | `PROMPT_ENHANCER_MODEL` | Active session model | Optional explicit model ID override for CLI plugin hook. |
