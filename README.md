@@ -127,7 +127,7 @@ Licensed under the [MIT License](LICENSE).
   ```powershell
   powershell -ExecutionPolicy Bypass -File scripts/prompt-enhancer/ide-extension/install-ide-enhancer.ps1 -Uninstall
   ```
-  Restores `workbench.html`, `workbench-jetski-agent.html`, and `extensions\agy\vscode\extension.js` from `.enhancer.bak`, removes injected scripts, and unregisters the extension.
+  Restores `workbench.html`, `workbench-jetski-agent.html`, and `extensions\agy\vscode\extension.js` from `.enhancer.bak`, re-syncs `product.json` workbench checksums, removes injected scripts, and unregisters the extension.
 - **Antigravity CLI Plugin**:
   ```powershell
   powershell -ExecutionPolicy Bypass -File plugins/prompt-enhancer/install-plugin.ps1 -Uninstall

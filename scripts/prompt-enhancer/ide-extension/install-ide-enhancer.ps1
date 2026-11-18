@@ -46,6 +46,80 @@ function Resolve-IdeAppRoot {
     return $(if ($candidates.Count -gt 0) { $candidates[0] } else { "" })
 }
 
+function Write-Utf8NoBom {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Content
+    )
+    $enc = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($Path, $Content, $enc)
+}
+
+function Get-Sha256Base64NoPad {
+    param([Parameter(Mandatory = $true)][string]$FilePath)
+    $bytes = [System.IO.File]::ReadAllBytes($FilePath)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $hash = $sha.ComputeHash($bytes)
+        return [Convert]::ToBase64String($hash).TrimEnd('=')
+    } finally {
+        $sha.Dispose()
+    }
+}
+
+function Sync-ProductJsonChecksums {
+    param([string]$AppRoot)
+    if (-not $AppRoot) { return $false }
+    $pjPath = Join-Path $AppRoot "product.json"
+    if (-not (Test-Path -LiteralPath $pjPath)) { return $false }
+
+    $rawText = [System.IO.File]::ReadAllText($pjPath, [System.Text.UTF8Encoding]::new($false))
+    $cleanText = if ($rawText.Length -gt 0 -and $rawText[0] -eq [char]0xFEFF) { $rawText.Substring(1) } else { $rawText }
+    $parsed = $cleanText | ConvertFrom-Json
+    if (-not $parsed -or -not $parsed.checksums) { return $false }
+
+    $targetKeys = @(
+        "vs/code/electron-browser/workbench/workbench.html",
+        "vs/code/electron-browser/workbench/workbench-jetski-agent.html"
+    )
+
+    $updates = @()
+    foreach ($relKey in $targetKeys) {
+        $prop = $parsed.checksums.PSObject.Properties[$relKey]
+        if (-not $prop) { continue }
+        $diskPath = Join-Path $AppRoot (Join-Path "out" ($relKey -replace "/", "\"))
+        if (-not (Test-Path -LiteralPath $diskPath)) { continue }
+        $expected = [string]$prop.Value
+        $actual = Get-Sha256Base64NoPad -FilePath $diskPath
+        if ($expected -ne $actual) {
+            $updates += [pscustomobject]@{ Key = $relKey; Expected = $expected; Actual = $actual }
+            $prop.Value = $actual
+        }
+    }
+
+    if ($updates.Count -eq 0) { return $false }
+
+    $nextText = $cleanText
+    $allReplaced = $true
+    foreach ($u in $updates) {
+        $pattern = '("' + [regex]::Escape($u.Key) + '"\s*:\s*")' + [regex]::Escape($u.Expected) + '(")'
+        if ($nextText -match $pattern) {
+            $nextText = [regex]::Replace($nextText, $pattern, ('$1' + $u.Actual + '$2'), 1)
+        } else {
+            $allReplaced = $false
+            break
+        }
+    }
+
+    if (-not $allReplaced) {
+        $nextText = ($parsed | ConvertTo-Json -Depth 16)
+    }
+
+    Write-Utf8NoBom -Path $pjPath -Content $nextText
+    Write-Host "Synchronized product.json workbench checksums" -ForegroundColor Green
+    return $true
+}
+
 $srcDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $extId = "local.antigravity-prompt-enhancer"
 $extFolderName = "local.antigravity-prompt-enhancer-1.0.0-universal"
@@ -74,6 +148,10 @@ if ($Uninstall) {
         }
     }
 
+    if ($resolvedAppRoot -and $PSCmdlet.ShouldProcess((Join-Path $resolvedAppRoot "product.json"), "Restore workbench checksums in product.json")) {
+        [void](Sync-ProductJsonChecksums -AppRoot $resolvedAppRoot)
+    }
+
     if ($agyExtJs -and (Test-Path -LiteralPath "$agyExtJs.enhancer.bak")) {
         if ($PSCmdlet.ShouldProcess($agyExtJs, "Restore extensions\agy\vscode\extension.js from backup")) {
             Copy-Item -LiteralPath "$agyExtJs.enhancer.bak" -Destination $agyExtJs -Force
@@ -88,7 +166,7 @@ if ($Uninstall) {
             $parsed = $raw | ConvertFrom-Json
             $kept = @($parsed | Where-Object { $_.identifier.id -ne $extId })
             if ($PSCmdlet.ShouldProcess($extJsonPath, "Unregister $extId")) {
-                ($kept | ConvertTo-Json -Depth 8 -Compress) | Set-Content -LiteralPath $extJsonPath -Encoding UTF8
+                Write-Utf8NoBom -Path $extJsonPath -Content ($kept | ConvertTo-Json -Depth 8 -Compress)
             }
         }
     }
@@ -159,7 +237,7 @@ $newEntry = [ordered]@{
 }
 $entries += $newEntry
 if ($PSCmdlet.ShouldProcess($extJsonPath, "Register $extId in extensions.json")) {
-    ($entries | ConvertTo-Json -Depth 8 -Compress) | Set-Content -LiteralPath $extJsonPath -Encoding UTF8
+    Write-Utf8NoBom -Path $extJsonPath -Content ($entries | ConvertTo-Json -Depth 8 -Compress)
 }
 
 # Pre-install the hook script & script tag into Antigravity IDE workbench HTMLs.
@@ -175,24 +253,26 @@ if ($wbDir -and (Test-Path -LiteralPath $wbDir)) {
     )) {
         $hp = Join-Path $wbDir $item.file
         if (-not (Test-Path -LiteralPath $hp)) { continue }
-        $content = Get-Content -LiteralPath $hp -Raw -Encoding UTF8
+        $content = [System.IO.File]::ReadAllText($hp, [System.Text.UTF8Encoding]::new($false))
+        if ($content.Length -gt 0 -and $content[0] -eq [char]0xFEFF) { $content = $content.Substring(1) }
         if ($content -notmatch "enhance-ide-hook\.js") {
             $bak = "$hp.enhancer.bak"
             if ($PSCmdlet.ShouldProcess($hp, "Patch $($item.file) with enhance-ide-hook.js")) {
-                if (-not (Test-Path -LiteralPath $bak)) {
-                    Set-Content -LiteralPath $bak -Value $content -Encoding UTF8 -NoNewline
-                }
+                Copy-Item -LiteralPath $hp -Destination $bak -Force
                 if ($content.Contains($item.anchor)) {
                     $content = $content.Replace($item.anchor, "$($item.anchor)`n$tag")
                 } else {
                     $content = $content.Replace("</html>", "$tag`n</html>")
                 }
-                Set-Content -LiteralPath $hp -Value $content -Encoding UTF8 -NoNewline
+                Write-Utf8NoBom -Path $hp -Content $content
                 Write-Host "Patched $($item.file)" -ForegroundColor Green
             }
         } else {
             Write-Host "$($item.file) already patched" -ForegroundColor DarkGray
         }
+    }
+    if ($resolvedAppRoot -and $PSCmdlet.ShouldProcess((Join-Path $resolvedAppRoot "product.json"), "Synchronize workbench checksums in product.json")) {
+        [void](Sync-ProductJsonChecksums -AppRoot $resolvedAppRoot)
     }
 } elseif ($resolvedAppRoot) {
     Write-Host "Antigravity IDE workbench directory not found at $wbDir (skipping workbench pre-patch)" -ForegroundColor Yellow
@@ -201,7 +281,8 @@ if ($wbDir -and (Test-Path -LiteralPath $wbDir)) {
 # Pre-patch Antigravity built-in agy extension iframe loader so sidebar webview routes through our local enhancer proxy.
 if ($agyExtJs -and (Test-Path -LiteralPath $agyExtJs)) {
     $marker = '/*AGY_ENHANCER_IFRAME_HOOK*/'
-    $extContent = Get-Content -LiteralPath $agyExtJs -Raw -Encoding UTF8
+    $extContent = [System.IO.File]::ReadAllText($agyExtJs, [System.Text.UTF8Encoding]::new($false))
+    if ($extContent.Length -gt 0 -and $extContent[0] -eq [char]0xFEFF) { $extContent = $extContent.Substring(1) }
     if ($extContent -notmatch [regex]::Escape($marker)) {
         $matchedTarget = $null
         $urlVar = 'd'
@@ -216,12 +297,10 @@ if ($agyExtJs -and (Test-Path -LiteralPath $agyExtJs)) {
         if ($matchedTarget) {
             $bak = "$agyExtJs.enhancer.bak"
             if ($PSCmdlet.ShouldProcess($agyExtJs, "Patch renderIframe with enhancer proxy redirect")) {
-                if (-not (Test-Path -LiteralPath $bak)) {
-                    Set-Content -LiteralPath $bak -Value $extContent -Encoding UTF8 -NoNewline
-                }
+                Copy-Item -LiteralPath $agyExtJs -Destination $bak -Force
                 $hookExpr = $marker + $urlVar + '=((u)=>{try{const p=require("path").join(__dirname,"..","..","..","out","vs","code","electron-browser","workbench","enhance-ide-hook-config.json");const cfg=JSON.parse(require("fs").readFileSync(p,"utf8"));if(cfg&&cfg.port&&/^http:\/\/127\.0\.0\.1:(\d+)/.test(u)){const x=new URL(u);x.searchParams.set("__agy_hub",x.port);x.port=String(cfg.port);return x.toString()}}catch{}return u})(' + $urlVar + ');'
                 $extContent = $extContent.Replace($matchedTarget, $matchedTarget + $hookExpr)
-                Set-Content -LiteralPath $agyExtJs -Value $extContent -Encoding UTF8 -NoNewline
+                Write-Utf8NoBom -Path $agyExtJs -Content $extContent
                 Write-Host "Patched extensions\agy\vscode\extension.js" -ForegroundColor Green
             }
         } else {

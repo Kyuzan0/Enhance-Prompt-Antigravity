@@ -465,6 +465,79 @@ function patchAgyExtensionContent(content) {
   };
 }
 
+const WORKBENCH_CHECKSUM_KEYS = [
+  "vs/code/electron-browser/workbench/workbench.html",
+  "vs/code/electron-browser/workbench/workbench-jetski-agent.html",
+];
+
+function computeFileChecksum(filePath) {
+  const bytes = fs.readFileSync(filePath);
+  return crypto.createHash("sha256").update(bytes).digest("base64").replace(/=+$/, "");
+}
+
+function escapeRegExp(text) {
+  return String(text).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function syncProductJsonChecksums(appRoot) {
+  if (!appRoot) return { updated: false, updatedKeys: [] };
+  const productJsonPath = path.join(appRoot, "product.json");
+  if (!fs.existsSync(productJsonPath)) return { updated: false, updatedKeys: [] };
+
+  let rawText;
+  let parsed;
+  try {
+    rawText = fs.readFileSync(productJsonPath, "utf8");
+    const cleanText = rawText.charCodeAt(0) === 0xfeff ? rawText.slice(1) : rawText;
+    parsed = JSON.parse(cleanText);
+  } catch {
+    return { updated: false, updatedKeys: [] };
+  }
+
+  if (!parsed || typeof parsed.checksums !== "object" || parsed.checksums === null) {
+    return { updated: false, updatedKeys: [] };
+  }
+
+  const updates = [];
+  for (const relKey of WORKBENCH_CHECKSUM_KEYS) {
+    if (!Object.prototype.hasOwnProperty.call(parsed.checksums, relKey)) continue;
+    const diskPath = path.join(appRoot, "out", ...relKey.split("/"));
+    if (!fs.existsSync(diskPath)) continue;
+    const expected = parsed.checksums[relKey];
+    const actual = computeFileChecksum(diskPath);
+    if (expected !== actual) {
+      updates.push({ relKey, expected, actual });
+      parsed.checksums[relKey] = actual;
+    }
+  }
+
+  if (updates.length === 0) {
+    return { updated: false, updatedKeys: [] };
+  }
+
+  let nextText = rawText.charCodeAt(0) === 0xfeff ? rawText.slice(1) : rawText;
+  let allReplacedSurgically = true;
+  for (const u of updates) {
+    const pattern = new RegExp(
+      `("${escapeRegExp(u.relKey)}"\\s*:\\s*")${escapeRegExp(String(u.expected || ""))}(")`
+    );
+    if (pattern.test(nextText)) {
+      nextText = nextText.replace(pattern, `$1${u.actual}$2`);
+    } else {
+      allReplacedSurgically = false;
+      break;
+    }
+  }
+
+  if (!allReplacedSurgically) {
+    const trailingNl = nextText.endsWith("\r\n") ? "\r\n" : nextText.endsWith("\n") ? "\n" : "";
+    nextText = JSON.stringify(parsed, null, "\t") + trailingNl;
+  }
+
+  fs.writeFileSync(productJsonPath, nextText, "utf8");
+  return { updated: true, updatedKeys: updates.map((u) => u.relKey) };
+}
+
 function patchAgyExtensionIframe() {
   if (!vscode) return false;
   const agyExtJs = path.join(vscode.env.appRoot, "extensions", "agy", "vscode", "extension.js");
@@ -474,18 +547,18 @@ function patchAgyExtensionIframe() {
   if (!patched.changed) return false;
 
   const bakPath = `${agyExtJs}.enhancer.bak`;
-  if (!fs.existsSync(bakPath)) {
-    fs.writeFileSync(bakPath, content, "utf8");
-  }
+  // Target is currently unpatched (fresh install or IDE update), so always refresh backup to match current version.
+  fs.writeFileSync(bakPath, content, "utf8");
 
   fs.writeFileSync(agyExtJs, patched.content, "utf8");
   return true;
 }
 
-function ensureIdeHookInstalled(context, port, token) {
-  if (!vscode) return { patched: false, reason: "vscode host unavailable" };
-  const wbDir = path.join(vscode.env.appRoot, "out", "vs", "code", "electron-browser", "workbench");
-  if (!fs.existsSync(wbDir)) return { patched: false, reason: "workbench dir not found" };
+function ensureIdeHookInstalled(context, port, token, appRootOverride = "") {
+  const appRoot = appRootOverride || (vscode && vscode.env && vscode.env.appRoot) || "";
+  if (!appRoot) return { patched: false, hookUpdated: false, checksumsUpdated: false, reason: "appRoot unavailable" };
+  const wbDir = path.join(appRoot, "out", "vs", "code", "electron-browser", "workbench");
+  if (!fs.existsSync(wbDir)) return { patched: false, hookUpdated: false, checksumsUpdated: false, reason: "workbench dir not found" };
 
   const srcHook = path.join(context.extensionPath, HOOK_SCRIPT_NAME);
   const dstHook = path.join(wbDir, HOOK_SCRIPT_NAME);
@@ -512,9 +585,8 @@ function ensureIdeHookInstalled(context, port, token) {
     if (html.includes(HOOK_SCRIPT_NAME)) continue;
 
     const bakPath = `${htmlPath}.enhancer.bak`;
-    if (!fs.existsSync(bakPath)) {
-      fs.writeFileSync(bakPath, html, "utf8");
-    }
+    // Target HTML does not contain our hook yet, so save exact current version as clean backup.
+    fs.writeFileSync(bakPath, html, "utf8");
     const nextHtml = html.includes(t.anchor)
       ? html.replace(t.anchor, `${t.anchor}\n${SCRIPT_TAG}`)
       : html.replace("</html>", `${SCRIPT_TAG}\n</html>`);
@@ -522,9 +594,17 @@ function ensureIdeHookInstalled(context, port, token) {
     htmlPatched = true;
   }
 
-  const iframePatched = patchAgyExtensionIframe();
+  let checksumsUpdated = false;
+  try {
+    const cs = syncProductJsonChecksums(appRoot);
+    checksumsUpdated = Boolean(cs && cs.updated);
+  } catch (err) {
+    console.error("[PromptEnhancer] Failed to sync product.json checksums:", err);
+  }
 
-  return { patched: htmlPatched || iframePatched, hookUpdated };
+  const iframePatched = appRootOverride ? false : patchAgyExtensionIframe();
+
+  return { patched: htmlPatched || iframePatched, hookUpdated, checksumsUpdated };
 }
 
 function parsePortCookie(cookieHeader) {
@@ -902,8 +982,8 @@ function activate(context) {
     vscode.commands.registerCommand("antigravityEnhancer.reinstallHook", () => {
       const status = ensureIdeHookInstalled(context, serverPort, token);
       vscode.window.showInformationMessage(
-        status.patched
-          ? "Prompt Enhancer IDE hook installed. Please reload window."
+        status.patched || status.checksumsUpdated
+          ? "Prompt Enhancer IDE hook and checksums updated. Please reload window."
           : "Prompt Enhancer IDE hook is already up to date."
       );
     }),
@@ -934,4 +1014,7 @@ module.exports = {
   resolveHubTarget,
   injectHookIntoHtml,
   patchAgyExtensionContent,
+  computeFileChecksum,
+  syncProductJsonChecksums,
+  ensureIdeHookInstalled,
 };
