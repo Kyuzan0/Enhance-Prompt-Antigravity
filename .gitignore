@@ -1,6 +1,6 @@
-# Documentation & runbooks (kept locally, excluded from GitHub upload)
-README.md
+# Subdirectory documentation & runbooks (keep root README.md, exclude the rest)
 **/README.md
+!/README.md
 RUNBOOK_*.md
 
 # Tests, smoke scripts, test specs, and binary test fixtures
