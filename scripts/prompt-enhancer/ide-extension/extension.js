@@ -20,6 +20,92 @@ const HUB_COOKIE_NAME = "agy_enhancer_hub";
 const DEFAULT_PREFERRED_PORT = 47831;
 const DEFAULT_TIMEOUT_MS = 60000;
 
+const VALID_OUTPUT_LANGUAGES = new Set(["auto", "id", "en"]);
+const VALID_DETAIL_LEVELS = new Set(["concise", "balanced", "comprehensive"]);
+const PERSISTABLE_SETTING_KEYS = [
+  "shortcutEnabled",
+  "shortcut",
+  "outputLanguage",
+  "detailLevel",
+  "includeWorkspaceContext",
+  "includeConversationContext",
+  "showToast",
+];
+
+const DEFAULT_SETTINGS = Object.freeze({
+  shortcutEnabled: true,
+  shortcut: "Ctrl+Alt+E",
+  outputLanguage: "auto",
+  detailLevel: "balanced",
+  includeWorkspaceContext: true,
+  includeConversationContext: true,
+  showToast: true,
+  proxyPort: DEFAULT_PREFERRED_PORT,
+  cliPath: "",
+  timeoutMs: DEFAULT_TIMEOUT_MS,
+});
+
+function normalizeShortcut(raw) {
+  const input = String(raw || "").trim();
+  if (!input) return DEFAULT_SETTINGS.shortcut;
+
+  const parts = input.split("+").map((p) => p.trim()).filter(Boolean);
+  let hasCtrl = false;
+  let hasAlt = false;
+  let hasShift = false;
+  let hasMeta = false;
+  let mainKey = "";
+
+  for (const part of parts) {
+    const low = part.toLowerCase();
+    if (low === "ctrl" || low === "control") hasCtrl = true;
+    else if (low === "alt" || low === "option") hasAlt = true;
+    else if (low === "shift") hasShift = true;
+    else if (low === "cmd" || low === "meta" || low === "super" || low === "win") hasMeta = true;
+    else mainKey = part;
+  }
+
+  if (!mainKey) return DEFAULT_SETTINGS.shortcut;
+  // Require at least one modifier key so normal typing is never hijacked.
+  if (!hasCtrl && !hasAlt && !hasShift && !hasMeta) return DEFAULT_SETTINGS.shortcut;
+
+  const normKey = mainKey.length === 1 ? mainKey.toUpperCase() : mainKey[0].toUpperCase() + mainKey.slice(1);
+  const out = [];
+  if (hasCtrl) out.push("Ctrl");
+  if (hasAlt) out.push("Alt");
+  if (hasShift) out.push("Shift");
+  if (hasMeta) out.push("Cmd");
+  out.push(normKey);
+  return out.join("+");
+}
+
+function normalizeSettings(raw) {
+  const src = raw && typeof raw === "object" ? raw : {};
+  const lang = String(src.outputLanguage || DEFAULT_SETTINGS.outputLanguage).toLowerCase();
+  const detail = String(src.detailLevel || DEFAULT_SETTINGS.detailLevel).toLowerCase();
+  const portNum = Number(src.proxyPort);
+  const timeoutNum = Number(src.timeoutMs);
+
+  return {
+    shortcutEnabled: src.shortcutEnabled !== undefined ? Boolean(src.shortcutEnabled) : DEFAULT_SETTINGS.shortcutEnabled,
+    shortcut: normalizeShortcut(src.shortcut !== undefined ? src.shortcut : DEFAULT_SETTINGS.shortcut),
+    outputLanguage: VALID_OUTPUT_LANGUAGES.has(lang) ? lang : DEFAULT_SETTINGS.outputLanguage,
+    detailLevel: VALID_DETAIL_LEVELS.has(detail) ? detail : DEFAULT_SETTINGS.detailLevel,
+    includeWorkspaceContext:
+      src.includeWorkspaceContext !== undefined ? Boolean(src.includeWorkspaceContext) : DEFAULT_SETTINGS.includeWorkspaceContext,
+    includeConversationContext:
+      src.includeConversationContext !== undefined
+        ? Boolean(src.includeConversationContext)
+        : DEFAULT_SETTINGS.includeConversationContext,
+    showToast: src.showToast !== undefined ? Boolean(src.showToast) : DEFAULT_SETTINGS.showToast,
+    proxyPort:
+      Number.isInteger(portNum) && portNum > 0 && portNum < 65536 ? portNum : DEFAULT_SETTINGS.proxyPort,
+    cliPath: typeof src.cliPath === "string" ? src.cliPath.trim() : DEFAULT_SETTINGS.cliPath,
+    timeoutMs:
+      Number.isFinite(timeoutNum) && timeoutNum >= 1000 ? Math.floor(timeoutNum) : DEFAULT_SETTINGS.timeoutMs,
+  };
+}
+
 function getExtensionSetting(key, fallback) {
   try {
     const cfg = vscode && vscode.workspace && vscode.workspace.getConfiguration("antigravityPromptEnhancer");
@@ -31,6 +117,34 @@ function getExtensionSetting(key, fallback) {
     // ignore
   }
   return fallback;
+}
+
+function readAllSettings() {
+  const raw = { ...DEFAULT_SETTINGS };
+  for (const key of Object.keys(DEFAULT_SETTINGS)) {
+    raw[key] = getExtensionSetting(key, DEFAULT_SETTINGS[key]);
+  }
+  const envPort = Number(process.env.AGY_ENHANCER_PORT || 0);
+  if (Number.isInteger(envPort) && envPort > 0 && envPort < 65536) raw.proxyPort = envPort;
+  const envTimeout = Number(process.env.AGY_ENHANCER_TIMEOUT_MS || 0);
+  if (Number.isFinite(envTimeout) && envTimeout >= 1000) raw.timeoutMs = Math.floor(envTimeout);
+  if (process.env.AGY_CLI_BIN && process.env.AGY_CLI_BIN.trim()) raw.cliPath = process.env.AGY_CLI_BIN.trim();
+  return normalizeSettings(raw);
+}
+
+async function saveSettingsPatch(patch) {
+  const current = readAllSettings();
+  const merged = normalizeSettings({ ...current, ...(patch && typeof patch === "object" ? patch : {}) });
+  if (vscode && vscode.workspace) {
+    const cfg = vscode.workspace.getConfiguration("antigravityPromptEnhancer");
+    const target = vscode.ConfigurationTarget ? vscode.ConfigurationTarget.Global : true;
+    for (const key of PERSISTABLE_SETTING_KEYS) {
+      if (patch && Object.prototype.hasOwnProperty.call(patch, key)) {
+        await cfg.update(key, merged[key], target);
+      }
+    }
+  }
+  return readAllSettings();
 }
 
 function resolvePreferredPort() {
@@ -185,29 +299,44 @@ function findAgyCliBinary() {
   return "";
 }
 
-function buildEnhancePrompt(draft, context, workspaceContext) {
+function buildEnhancePrompt(draft, context, workspaceContext, settings) {
+  const effectiveSettings = normalizeSettings(settings);
+  const langRule =
+    effectiveSettings.outputLanguage === "id"
+      ? "5. Write the enhanced prompt in clear, natural Indonesian (keep code identifiers/paths accurate)."
+      : effectiveSettings.outputLanguage === "en"
+        ? "5. Write the enhanced prompt in clear, concise English."
+        : "5. Preserve the user's original language (Indonesian or English).";
+
+  const detailRule =
+    effectiveSettings.detailLevel === "concise"
+      ? "2. Keep the enhanced prompt concise and compact (around 1-4 short sentences or brief bullets), avoiding verbose section templates."
+      : effectiveSettings.detailLevel === "comprehensive"
+        ? "2. Make the prompt thorough and production-grade—explicitly detailing objective, architecture/file scope, edge cases & error handling, constraints, and concrete verification steps."
+        : "2. Make the prompt complete, clear, and actionable—covering objective, specific scope/files/components relevant to this project and discussion, concrete analysis or implementation steps, and expected output/verification.";
+
   const parts = [
     "You are a Senior Software Architect and Prompt Engineer.",
-    "Rewrite and enhance the user's raw prompt into a thorough, well-structured, project-specific prompt that gives the AI coding assistant everything it needs to execute accurately.",
+    "Rewrite and enhance the user's raw prompt into a clear, project-specific prompt that gives the AI coding assistant everything it needs to execute accurately.",
     "",
     "CRITICAL RULES:",
-    "1. Anchor the enhanced prompt in the CONVERSATION CONTEXT and WORKSPACE CONTEXT below:",
+    "1. Anchor the enhanced prompt in the CONVERSATION CONTEXT and WORKSPACE CONTEXT below (when provided):",
     "   - Resolve all references ('itu', 'tadi', 'projek ini', 'fitur ini') using the actual discussion, tech stack, manifests, directories, and open files listed below.",
     "   - NEVER include generic boilerplate examples (like 'misal: composer.json, requirements.txt, MVC/N+1 queries') that do NOT apply to this actual workspace.",
-    "2. Make the prompt complete, clear, and actionable—covering objective, specific scope/files/components relevant to this project and discussion, concrete analysis or implementation steps, and expected output/verification.",
+    detailRule,
     "3. Stay strictly faithful to the user's intent and the active discussion.",
     "4. Output ONLY the enhanced prompt text. No preamble, no markdown code fence wrapping the whole reply, no commentary.",
-    "5. Preserve the user's original language (Indonesian or English).",
+    langRule,
     "6. Keep ALL placeholder tokens like [[AGY_CHIP_0]], [[AGY_CHIP_1]], etc. verbatim and in natural positions.",
     "7. Do NOT execute any tools, read files, or answer the prompt; ONLY rewrite the prompt itself.",
   ];
 
-  const trimmedWs = String(workspaceContext || "").trim();
+  const trimmedWs = effectiveSettings.includeWorkspaceContext ? String(workspaceContext || "").trim() : "";
   if (trimmedWs) {
     parts.push("", "WORKSPACE CONTEXT (active project):", trimmedWs);
   }
 
-  const trimmedCtx = String(context || "").trim();
+  const trimmedCtx = effectiveSettings.includeConversationContext ? String(context || "").trim() : "";
   if (trimmedCtx) {
     parts.push("", "CONVERSATION CONTEXT (most recent discussion):", trimmedCtx.slice(-6500));
   }
@@ -223,15 +352,17 @@ function cleanOutput(text) {
   return out;
 }
 
-function runEnhanceCli({ draft, context, model, cwd }) {
+function runEnhanceCli({ draft, context, model, cwd, settings }) {
   return new Promise((resolve, reject) => {
     const agyBin = findAgyCliBinary();
     if (!agyBin) {
       return reject(new Error("Native agy CLI binary not found in ~/.gemini/bin/agy.exe"));
     }
 
+    const effectiveSettings = normalizeSettings(settings || readAllSettings());
     const resolvedModel = resolveDynamicModel(model);
-    const workspaceContext = collectWorkspaceContext(cwd);
+    const workspaceContext = effectiveSettings.includeWorkspaceContext ? collectWorkspaceContext(cwd) : "";
+    const convContext = effectiveSettings.includeConversationContext ? context : "";
     const strictSettings = JSON.stringify({
       toolPermission: "strict",
       permissions: {
@@ -251,7 +382,7 @@ function runEnhanceCli({ draft, context, model, cwd }) {
       "--settings",
       strictSettings,
       "-p",
-      buildEnhancePrompt(draft, context, workspaceContext),
+      buildEnhancePrompt(draft, convContext, workspaceContext, effectiveSettings),
       "--output-format",
       "text",
       "--disable-slash-commands",
@@ -495,6 +626,18 @@ function activate(context) {
     });
   };
 
+  const sseClients = new Set();
+  const broadcastSse = (eventName, payload) => {
+    const msg = `event: ${eventName}\ndata: ${JSON.stringify(payload || {})}\n\n`;
+    for (const clientRes of sseClients) {
+      try {
+        clientRes.write(msg);
+      } catch {
+        sseClients.delete(clientRes);
+      }
+    }
+  };
+
   const server = http.createServer((req, res) => {
     if (req.method === "OPTIONS") {
       res.writeHead(204, {
@@ -507,6 +650,67 @@ function activate(context) {
     }
 
     const reqPath = (req.url || "/").split("?")[0];
+
+    if (req.method === "GET" && reqPath === "/__enhancer/events") {
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-store",
+        Connection: "keep-alive",
+      });
+      res.write(`event: settings\ndata: ${JSON.stringify(readAllSettings())}\n\n`);
+      sseClients.add(res);
+      req.on("close", () => sseClients.delete(res));
+      return;
+    }
+
+    if (req.method === "GET" && reqPath === "/__enhancer/settings") {
+      res.writeHead(200, {
+        "Content-Type": "application/json",
+        "Cache-Control": "no-store",
+        "Access-Control-Allow-Origin": "*",
+      });
+      res.end(JSON.stringify({ ok: true, settings: readAllSettings() }));
+      return;
+    }
+
+    if (req.method === "POST" && reqPath === "/__enhancer/settings") {
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      if (req.headers["x-enhancer-token"] !== token) {
+        res.writeHead(403, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "Forbidden" }));
+        return;
+      }
+      let body = "";
+      req.on("data", (c) => { body += c; if (body.length > 65536) req.destroy(); });
+      req.on("end", async () => {
+        try {
+          const patch = JSON.parse(body || "{}");
+          const saved = await saveSettingsPatch(patch);
+          broadcastSse("settings", saved);
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true, settings: saved }));
+        } catch (err) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: err?.message || String(err) }));
+        }
+      });
+      return;
+    }
+
+    if (req.method === "POST" && reqPath === "/__enhancer/open-vscode-settings") {
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      if (req.headers["x-enhancer-token"] !== token) {
+        res.writeHead(403, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "Forbidden" }));
+        return;
+      }
+      if (vscode) {
+        vscode.commands.executeCommand("workbench.action.openSettings", "@ext:local.antigravity-prompt-enhancer");
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true }));
+      return;
+    }
 
     if (req.method === "POST" && reqPath === "/__enhancer/client-log") {
       let body = "";
@@ -526,7 +730,7 @@ function activate(context) {
 
     if (req.method === "GET" && reqPath === "/__enhancer/config.json") {
       res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
-      res.end(JSON.stringify({ port: serverPort, token }));
+      res.end(JSON.stringify({ port: serverPort, token, settings: readAllSettings() }));
       return;
     }
 
@@ -534,7 +738,11 @@ function activate(context) {
       try {
         const hookPath = path.join(context.extensionPath, HOOK_SCRIPT_NAME);
         const hookBody = fs.readFileSync(hookPath, "utf8");
-        const prefix = `window.__AGY_ENHANCER_CONFIG__ = ${JSON.stringify({ port: serverPort, token })};\n`;
+        const prefix = `window.__AGY_ENHANCER_CONFIG__ = ${JSON.stringify({
+          port: serverPort,
+          token,
+          settings: readAllSettings(),
+        })};\n`;
         res.writeHead(200, {
           "Content-Type": "application/javascript; charset=utf-8",
           "Cache-Control": "no-store",
@@ -662,7 +870,35 @@ function activate(context) {
   server.listen(resolvePreferredPort(), "127.0.0.1", onListening);
 
   context.subscriptions.push(
-    { dispose: () => server.close() },
+    {
+      dispose: () => {
+        for (const clientRes of sseClients) {
+          try {
+            clientRes.end();
+          } catch {
+            // ignore
+          }
+        }
+        sseClients.clear();
+        server.close();
+      },
+    },
+    vscode.commands.registerCommand("antigravityEnhancer.enhancePrompt", () => {
+      if (sseClients.size > 0) {
+        broadcastSse("enhance", { source: "command" });
+      } else {
+        vscode.window.showInformationMessage(
+          "Open the Antigravity chat panel with an active draft prompt to run Enhance Prompt."
+        );
+      }
+    }),
+    vscode.commands.registerCommand("antigravityEnhancer.openSettings", () => {
+      if (sseClients.size > 0) {
+        broadcastSse("open-settings", {});
+      } else {
+        vscode.commands.executeCommand("workbench.action.openSettings", "@ext:local.antigravity-prompt-enhancer");
+      }
+    }),
     vscode.commands.registerCommand("antigravityEnhancer.reinstallHook", () => {
       const status = ensureIdeHookInstalled(context, serverPort, token);
       vscode.window.showInformationMessage(
@@ -670,6 +906,11 @@ function activate(context) {
           ? "Prompt Enhancer IDE hook installed. Please reload window."
           : "Prompt Enhancer IDE hook is already up to date."
       );
+    }),
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration("antigravityPromptEnhancer")) {
+        broadcastSse("settings", readAllSettings());
+      }
     })
   );
 }
@@ -679,6 +920,11 @@ function deactivate() {}
 module.exports = {
   activate,
   deactivate,
+  DEFAULT_SETTINGS,
+  normalizeShortcut,
+  normalizeSettings,
+  readAllSettings,
+  saveSettingsPatch,
   resolveDynamicModel,
   resolvePreferredPort,
   resolveEnhanceTimeoutMs,

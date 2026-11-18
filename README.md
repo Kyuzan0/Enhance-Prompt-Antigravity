@@ -7,7 +7,8 @@ Portable prompt-enhancement toolkit for **Antigravity IDE** and **Antigravity CL
 The repository provides modular integration layers depending on whether you work inside **Antigravity IDE** or the **Antigravity CLI (`agy`)** terminal:
 
 1. **Antigravity IDE Extension + Local Reverse Proxy (`scripts/prompt-enhancer/ide-extension/`)**
-   - VS Code-compatible extension (`local.antigravity-prompt-enhancer`) that places a **✦ Enhance Prompt** button directly to the left of the **Send (→)** button in the IDE chat sidebar (`antigravity.panel`), preserving Lexical `@mentions` and attachment chips.
+   - VS Code-compatible extension (`local.antigravity-prompt-enhancer`) that places a **✦ Enhance Prompt** button and **⚙ Settings** button directly to the left of the **Send (→)** button in the IDE chat sidebar (`antigravity.panel`), preserving Lexical `@mentions` and attachment chips.
+   - Supports a customizable keyboard shortcut (`Ctrl+Alt+E` / `Cmd+Alt+E` by default, configurable via Quick Settings popover or VS Code Keybindings `antigravityEnhancer.enhancePrompt`), persistent settings (`antigravityPromptEnhancer.*`), and an inline Quick Settings popover (`⚙`).
    - Because Antigravity IDE renders its chat inside a cross-origin `<iframe id="jetski-frame">` served by `agy --hub`, [extension.js](scripts/prompt-enhancer/ide-extension/extension.js) runs an HTTP + WebSocket loopback reverse proxy (default preferred port `47831`, isolated per window via `__agy_hub` query/Referer/cookie) to inject [enhance-ide-hook.js](scripts/prompt-enhancer/ide-extension/enhance-ide-hook.js), anchor prompts to active workspace & chat context, and invoke the native CLI (`agy -p`) with strict tool-deny settings. Self-heals patched IDE HTML/extension hooks on startup after IDE updates.
 2. **Antigravity CLI Plugin (`plugins/prompt-enhancer/`)**
    - `PreInvocation` lifecycle plugin ([plugin.json](plugins/prompt-enhancer/plugin.json), [hooks.json](plugins/prompt-enhancer/hooks.json), [hook.mjs](plugins/prompt-enhancer/hook.mjs)) and `/enhance` skill ([SKILL.md](plugins/prompt-enhancer/skills/enhance/SKILL.md)).
@@ -51,6 +52,9 @@ powershell -ExecutionPolicy Bypass -File scripts/prompt-enhancer/ide-extension/i
 
 Then run **`Developer: Reload Window`** (`Ctrl+Shift+P`) inside Antigravity IDE.
 
+- **Keyboard Shortcut**: Press **`Ctrl+Alt+E`** (`Cmd+Alt+E` on macOS) inside the chat input box (or trigger `Prompt Enhancer: Enhance Active Prompt` from the Command Palette).
+- **Quick Settings UI**: Click the **⚙** icon next to the **✦** button (or run `Prompt Enhancer: Open Settings`) to customize the shortcut, output language, detail level, context toggles, and status toast—all persisted to VS Code User Settings.
+
 ### 2. Antigravity CLI Plugin (`plugins/prompt-enhancer/`)
 
 ```powershell
@@ -75,6 +79,13 @@ powershell -ExecutionPolicy Bypass -File scripts/prompt-enhancer/wrapper/build.p
 
 | Variable / Setting | Default | Description |
 |---|---|---|
+| `antigravityPromptEnhancer.shortcutEnabled` | `true` | Enable keyboard shortcut trigger inside the IDE chat input box. |
+| `antigravityPromptEnhancer.shortcut` | `Ctrl+Alt+E` | Custom shortcut to trigger Enhance Prompt directly inside the chat input box. |
+| `antigravityPromptEnhancer.outputLanguage` | `auto` | Output language for enhanced prompts (`auto`, `id`, `en`). |
+| `antigravityPromptEnhancer.detailLevel` | `balanced` | Output detail level (`concise`, `balanced`, `comprehensive`). |
+| `antigravityPromptEnhancer.includeWorkspaceContext` | `true` | Include workspace structure, manifests, and open tabs in enhancement context. |
+| `antigravityPromptEnhancer.includeConversationContext` | `true` | Include recent active chat messages when resolving references. |
+| `antigravityPromptEnhancer.showToast` | `true` | Show status toast pill on completion or error inside the chat panel. |
 | `AGY_ENHANCER_PORT` / `antigravityPromptEnhancer.proxyPort` | `47831` | Preferred loopback port for the IDE extension proxy (falls back to ephemeral `0` if busy). |
 | `AGY_CLI_BIN` / `antigravityPromptEnhancer.cliPath` | Auto (`~/.gemini/bin/agy*`) | Override path to the native Antigravity CLI binary. |
 | `AGY_ENHANCER_TIMEOUT_MS` / `antigravityPromptEnhancer.timeoutMs` | `60000` | Subprocess timeout (ms) for `agy -p` inside the IDE extension. |

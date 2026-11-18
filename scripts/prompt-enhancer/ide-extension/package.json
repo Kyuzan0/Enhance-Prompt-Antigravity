@@ -1,8 +1,8 @@
 {
   "name": "antigravity-prompt-enhancer",
   "displayName": "Antigravity IDE Prompt Enhancer",
-  "description": "Adds an Enhance Prompt button next to the Send button in Antigravity IDE while preserving @mentions and attachments, with self-healing IDE update protection.",
-  "version": "1.0.0",
+  "description": "Adds an Enhance Prompt button, customizable keyboard shortcut, and settings in Antigravity IDE while preserving @mentions and attachments.",
+  "version": "1.1.0",
   "publisher": "local",
   "license": "MIT",
   "engines": {
@@ -18,13 +18,73 @@
   "contributes": {
     "commands": [
       {
+        "command": "antigravityEnhancer.enhancePrompt",
+        "title": "Prompt Enhancer: Enhance Active Prompt"
+      },
+      {
+        "command": "antigravityEnhancer.openSettings",
+        "title": "Prompt Enhancer: Open Settings"
+      },
+      {
         "command": "antigravityEnhancer.reinstallHook",
         "title": "Prompt Enhancer: Reinstall / Repair IDE UI Hook"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "antigravityEnhancer.enhancePrompt",
+        "key": "ctrl+alt+e",
+        "mac": "cmd+alt+e"
       }
     ],
     "configuration": {
       "title": "Antigravity Prompt Enhancer",
       "properties": {
+        "antigravityPromptEnhancer.shortcutEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable keyboard shortcut trigger inside the Antigravity chat input box."
+        },
+        "antigravityPromptEnhancer.shortcut": {
+          "type": "string",
+          "default": "Ctrl+Alt+E",
+          "description": "Custom keyboard shortcut to trigger Enhance Prompt directly inside the chat input box (e.g. Ctrl+Alt+E, Alt+Shift+E)."
+        },
+        "antigravityPromptEnhancer.outputLanguage": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "id",
+            "en"
+          ],
+          "default": "auto",
+          "description": "Preferred language for enhanced prompts: auto (preserve draft language), id (Indonesian), or en (English)."
+        },
+        "antigravityPromptEnhancer.detailLevel": {
+          "type": "string",
+          "enum": [
+            "concise",
+            "balanced",
+            "comprehensive"
+          ],
+          "default": "balanced",
+          "description": "Detail level of the rewritten prompt: concise, balanced, or comprehensive."
+        },
+        "antigravityPromptEnhancer.includeWorkspaceContext": {
+          "type": "boolean",
+          "default": true,
+          "description": "Include active workspace folders, manifests, and open editor tabs when enhancing prompts."
+        },
+        "antigravityPromptEnhancer.includeConversationContext": {
+          "type": "boolean",
+          "default": true,
+          "description": "Include recent messages from the active chat thread to resolve contextual references."
+        },
+        "antigravityPromptEnhancer.showToast": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show subtle status toast feedback inside the chat panel when enhancement completes or fails."
+        },
         "antigravityPromptEnhancer.proxyPort": {
           "type": "integer",
           "default": 47831,

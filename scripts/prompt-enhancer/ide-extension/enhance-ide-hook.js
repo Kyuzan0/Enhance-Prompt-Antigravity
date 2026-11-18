@@ -6,8 +6,26 @@
 
   const CHIP_TOKEN_PREFIX = "[[AGY_CHIP_";
   const CHIP_TOKEN_SUFFIX = "]]";
+  const DEFAULT_UI_SETTINGS = {
+    shortcutEnabled: true,
+    shortcut: "Ctrl+Alt+E",
+    outputLanguage: "auto",
+    detailLevel: "balanced",
+    includeWorkspaceContext: true,
+    includeConversationContext: true,
+    showToast: true,
+  };
   let cachedConfig = null;
+  let currentSettings = { ...DEFAULT_UI_SETTINGS };
+  let isRecordingShortcut = false;
+  let activePopoverEl = null;
+  let toastTimer = null;
+  let toastEl = null;
   let styleInjected = false;
+
+  if (window.__AGY_ENHANCER_CONFIG__ && window.__AGY_ENHANCER_CONFIG__.settings) {
+    currentSettings = { ...DEFAULT_UI_SETTINGS, ...window.__AGY_ENHANCER_CONFIG__.settings };
+  }
 
   function ensureStyle() {
     if (styleInjected || !document.head) return;
@@ -18,12 +36,18 @@
         from { transform: rotate(0deg); }
         to { transform: rotate(360deg); }
       }
-      .agy-enhance-btn {
+      .agy-enhance-group {
+        display: inline-flex;
+        align-items: center;
+        gap: 1px;
+        flex-shrink: 0;
+      }
+      .agy-enhance-btn, .agy-settings-btn {
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        width: 28px;
-        height: 28px;
+        width: 26px;
+        height: 26px;
         padding: 4px;
         border-radius: 9999px;
         border: none;
@@ -34,7 +58,12 @@
         transition: opacity 0.15s ease, background-color 0.15s ease, color 0.15s ease;
         flex-shrink: 0;
       }
-      .agy-enhance-btn:hover:not(:disabled) {
+      .agy-settings-btn {
+        width: 22px;
+        height: 22px;
+        opacity: 0.5;
+      }
+      .agy-enhance-btn:hover:not(:disabled), .agy-settings-btn:hover {
         opacity: 1;
         background-color: rgba(128, 128, 128, 0.18);
       }
@@ -50,8 +79,233 @@
         color: #f87171;
         opacity: 1;
       }
+      .agy-settings-popover {
+        position: fixed;
+        z-index: 99999;
+        width: 286px;
+        padding: 12px;
+        border-radius: 8px;
+        background: var(--vscode-editorWidget-background, #1f2228);
+        color: var(--vscode-foreground, #e5e7eb);
+        border: 1px solid var(--vscode-widget-border, rgba(255,255,255,0.14));
+        box-shadow: 0 10px 28px rgba(0,0,0,0.42);
+        font-family: var(--vscode-font-family, system-ui, -apple-system, sans-serif);
+        font-size: 12px;
+        line-height: 1.4;
+      }
+      .agy-sp-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 10px;
+        padding-bottom: 6px;
+        border-bottom: 1px solid rgba(128,128,128,0.22);
+        font-weight: 600;
+        font-size: 12px;
+      }
+      .agy-sp-status {
+        font-weight: 400;
+        font-size: 11px;
+        color: #4ade80;
+      }
+      .agy-sp-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+      .agy-sp-row label {
+        flex: 1;
+        cursor: pointer;
+        user-select: none;
+      }
+      .agy-sp-select, .agy-sp-shortcut-input {
+        background: var(--vscode-input-background, #14161a);
+        color: var(--vscode-input-foreground, #e5e7eb);
+        border: 1px solid var(--vscode-input-border, rgba(255,255,255,0.18));
+        border-radius: 4px;
+        padding: 3px 6px;
+        font-size: 11px;
+        outline: none;
+      }
+      .agy-sp-shortcut-wrap {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .agy-sp-shortcut-input {
+        width: 112px;
+        text-align: center;
+        cursor: pointer;
+      }
+      .agy-sp-shortcut-input:focus {
+        border-color: #60a5fa;
+      }
+      .agy-sp-mini-btn {
+        background: rgba(128,128,128,0.18);
+        color: inherit;
+        border: none;
+        border-radius: 4px;
+        padding: 3px 7px;
+        font-size: 11px;
+        cursor: pointer;
+      }
+      .agy-sp-mini-btn:hover {
+        background: rgba(128,128,128,0.3);
+      }
+      .agy-sp-footer {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 10px;
+        padding-top: 8px;
+        border-top: 1px solid rgba(128,128,128,0.22);
+      }
+      .agy-sp-hint {
+        font-size: 10px;
+        opacity: 0.72;
+        margin: -4px 0 8px 0;
+      }
+      .agy-toast-pill {
+        position: fixed;
+        z-index: 99998;
+        padding: 5px 10px;
+        border-radius: 9999px;
+        background: var(--vscode-editorWidget-background, #1f2228);
+        color: var(--vscode-foreground, #e5e7eb);
+        border: 1px solid rgba(128,128,128,0.3);
+        box-shadow: 0 4px 14px rgba(0,0,0,0.32);
+        font-family: var(--vscode-font-family, system-ui, sans-serif);
+        font-size: 11px;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.18s ease;
+      }
+      .agy-toast-pill.visible {
+        opacity: 0.96;
+      }
+      .agy-toast-pill.error {
+        border-color: rgba(248,113,113,0.6);
+        color: #fca5a5;
+      }
     `;
     document.head.appendChild(style);
+  }
+
+  function createGearSvg() {
+    const ns = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(ns, "svg");
+    svg.setAttribute("width", "13");
+    svg.setAttribute("height", "13");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("fill", "none");
+    svg.setAttribute("stroke", "currentColor");
+    svg.setAttribute("stroke-width", "2");
+    svg.setAttribute("stroke-linecap", "round");
+    svg.setAttribute("stroke-linejoin", "round");
+    const circle = document.createElementNS(ns, "circle");
+    circle.setAttribute("cx", "12");
+    circle.setAttribute("cy", "12");
+    circle.setAttribute("r", "3");
+    const pathEl = document.createElementNS(ns, "path");
+    pathEl.setAttribute("d", "M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z");
+    svg.appendChild(circle);
+    svg.appendChild(pathEl);
+    return svg;
+  }
+
+  function parseShortcut(str) {
+    const tokens = String(str || DEFAULT_UI_SETTINGS.shortcut)
+      .split("+")
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean);
+    const parsed = { ctrl: false, alt: false, shift: false, meta: false, key: "" };
+    for (const t of tokens) {
+      if (t === "ctrl" || t === "control") parsed.ctrl = true;
+      else if (t === "alt" || t === "option") parsed.alt = true;
+      else if (t === "shift") parsed.shift = true;
+      else if (t === "cmd" || t === "meta" || t === "super" || t === "win") parsed.meta = true;
+      else parsed.key = t;
+    }
+    return parsed;
+  }
+
+  function matchesShortcutEvent(e, shortcutStr) {
+    const spec = parseShortcut(shortcutStr);
+    if (!spec.key || (!spec.ctrl && !spec.alt && !spec.shift && !spec.meta)) return false;
+    const pressedKey = String(e.key || "").toLowerCase();
+    const codeKey = String(e.code || "").toLowerCase();
+    const keyMatch =
+      pressedKey === spec.key ||
+      (spec.key.length === 1 && codeKey === `key${spec.key}`) ||
+      (spec.key === "space" && pressedKey === " ");
+    return (
+      keyMatch &&
+      Boolean(e.ctrlKey) === spec.ctrl &&
+      Boolean(e.altKey) === spec.alt &&
+      Boolean(e.shiftKey) === spec.shift &&
+      Boolean(e.metaKey) === spec.meta
+    );
+  }
+
+  function formatShortcutFromEvent(e) {
+    const rawKey = String(e.key || "");
+    const low = rawKey.toLowerCase();
+    if (["control", "alt", "shift", "meta", "os"].includes(low)) return "";
+    if (!e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey) return "";
+    const out = [];
+    if (e.ctrlKey) out.push("Ctrl");
+    if (e.altKey) out.push("Alt");
+    if (e.shiftKey) out.push("Shift");
+    if (e.metaKey) out.push("Cmd");
+    let keyLabel = rawKey;
+    if (keyLabel === " ") keyLabel = "Space";
+    else if (keyLabel.length === 1) keyLabel = keyLabel.toUpperCase();
+    else keyLabel = keyLabel[0].toUpperCase() + keyLabel.slice(1);
+    out.push(keyLabel);
+    return out.join("+");
+  }
+
+  function formatEnhanceTooltip() {
+    if (currentSettings.shortcutEnabled && currentSettings.shortcut) {
+      return `Enhance Prompt (${currentSettings.shortcut})`;
+    }
+    return "Enhance Prompt";
+  }
+
+  function refreshAllTooltips() {
+    const btns = document.querySelectorAll('[data-testid="enhance-prompt-button"]');
+    const tip = formatEnhanceTooltip();
+    for (const b of btns) {
+      if (!b.classList.contains("agy-enhancing") && !b.classList.contains("agy-error")) {
+        b.title = tip;
+      }
+    }
+  }
+
+  function showToast(anchorEl, text, isError) {
+    if (!currentSettings.showToast || !document.body) return;
+    ensureStyle();
+    if (!toastEl) {
+      toastEl = document.createElement("div");
+      toastEl.className = "agy-toast-pill";
+      document.body.appendChild(toastEl);
+    }
+    toastEl.textContent = text;
+    toastEl.className = isError ? "agy-toast-pill error visible" : "agy-toast-pill visible";
+    if (anchorEl && anchorEl.getBoundingClientRect) {
+      const rect = anchorEl.getBoundingClientRect();
+      toastEl.style.right = `${Math.max(12, window.innerWidth - rect.right)}px`;
+      toastEl.style.bottom = `${Math.max(48, window.innerHeight - rect.top + 8)}px`;
+    } else {
+      toastEl.style.right = "16px";
+      toastEl.style.bottom = "56px";
+    }
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => {
+      if (toastEl) toastEl.classList.remove("visible");
+    }, 2800);
   }
 
   function createSparkleSvg() {
@@ -487,18 +741,268 @@
           });
         }
         btn.title = `Enhanced (${res.model || "active model"})`;
+        showToast(btn, `✦ Enhanced (${res.model || "active model"})`, false);
       } else {
         btn.title = "No changes suggested";
+        showToast(btn, "No changes suggested", false);
       }
     } catch (err) {
       console.error("[EnhanceHook] Enhance failed:", err);
       btn.classList.add("agy-error");
-      btn.title = `Enhance failed: ${err && err.message ? err.message : String(err)}`;
-      setTimeout(() => btn.classList.remove("agy-error"), 4000);
+      const errMsg = err && err.message ? err.message : String(err);
+      btn.title = `Enhance failed: ${errMsg}`;
+      showToast(btn, `Enhance failed: ${errMsg.slice(0, 80)}`, true);
+      setTimeout(() => {
+        btn.classList.remove("agy-error");
+        refreshAllTooltips();
+      }, 4000);
     } finally {
       btn.classList.remove("agy-enhancing");
       syncButtonDisabled(btn, inputEl);
     }
+  }
+
+  async function saveSettingsPatch(patch, statusEl) {
+    try {
+      const cfg = await loadConfig(false);
+      const url = window.location.protocol.startsWith("http")
+        ? "/__enhancer/settings"
+        : `http://127.0.0.1:${cfg.port}/__enhancer/settings`;
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Enhancer-Token": cfg.token,
+        },
+        body: JSON.stringify(patch),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (resp.ok && data.ok && data.settings) {
+        currentSettings = { ...DEFAULT_UI_SETTINGS, ...data.settings };
+        refreshAllTooltips();
+        if (statusEl) {
+          statusEl.textContent = "Saved";
+          setTimeout(() => {
+            if (statusEl) statusEl.textContent = "";
+          }, 1500);
+        }
+        return currentSettings;
+      }
+    } catch (err) {
+      console.warn("[EnhanceHook] Failed to save settings:", err);
+      if (statusEl) statusEl.textContent = "Save error";
+    }
+    return currentSettings;
+  }
+
+  function closeSettingsPopover() {
+    isRecordingShortcut = false;
+    if (activePopoverEl && activePopoverEl.parentNode) {
+      activePopoverEl.parentNode.removeChild(activePopoverEl);
+    }
+    activePopoverEl = null;
+  }
+
+  function buildCheckboxRow(labelText, key, statusEl) {
+    const row = document.createElement("div");
+    row.className = "agy-sp-row";
+    const id = `agy-sp-${key}`;
+    const label = document.createElement("label");
+    label.setAttribute("for", id);
+    label.textContent = labelText;
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.id = id;
+    input.checked = Boolean(currentSettings[key]);
+    input.addEventListener("change", () => {
+      currentSettings[key] = input.checked;
+      refreshAllTooltips();
+      saveSettingsPatch({ [key]: input.checked }, statusEl);
+    });
+    row.appendChild(label);
+    row.appendChild(input);
+    return row;
+  }
+
+  function buildSelectRow(labelText, key, options, statusEl) {
+    const row = document.createElement("div");
+    row.className = "agy-sp-row";
+    const id = `agy-sp-${key}`;
+    const label = document.createElement("label");
+    label.setAttribute("for", id);
+    label.textContent = labelText;
+    const select = document.createElement("select");
+    select.id = id;
+    select.className = "agy-sp-select";
+    for (const opt of options) {
+      const o = document.createElement("option");
+      o.value = opt.value;
+      o.textContent = opt.label;
+      if (currentSettings[key] === opt.value) o.selected = true;
+      select.appendChild(o);
+    }
+    select.addEventListener("change", () => {
+      currentSettings[key] = select.value;
+      saveSettingsPatch({ [key]: select.value }, statusEl);
+    });
+    row.appendChild(label);
+    row.appendChild(select);
+    return row;
+  }
+
+  function toggleSettingsPopover(anchorBtn) {
+    if (activePopoverEl) {
+      closeSettingsPopover();
+      return;
+    }
+    ensureStyle();
+
+    const pop = document.createElement("div");
+    pop.className = "agy-settings-popover";
+    pop.setAttribute("data-testid", "enhance-settings-popover");
+
+    const header = document.createElement("div");
+    header.className = "agy-sp-header";
+    const titleSpan = document.createElement("span");
+    titleSpan.textContent = "Prompt Enhancer Settings";
+    const statusEl = document.createElement("span");
+    statusEl.className = "agy-sp-status";
+    header.appendChild(titleSpan);
+    header.appendChild(statusEl);
+    pop.appendChild(header);
+
+    pop.appendChild(buildCheckboxRow("Enable Shortcut", "shortcutEnabled", statusEl));
+
+    // Interactive shortcut recorder row
+    const scRow = document.createElement("div");
+    scRow.className = "agy-sp-row";
+    const scLabel = document.createElement("label");
+    scLabel.textContent = "Shortcut";
+    const scWrap = document.createElement("div");
+    scWrap.className = "agy-sp-shortcut-wrap";
+    const scInput = document.createElement("input");
+    scInput.type = "text";
+    scInput.readOnly = true;
+    scInput.className = "agy-sp-shortcut-input";
+    scInput.value = currentSettings.shortcut || DEFAULT_UI_SETTINGS.shortcut;
+    scInput.title = "Click and press desired shortcut combination";
+    const scHint = document.createElement("div");
+    scHint.className = "agy-sp-hint";
+    scHint.textContent = "Click shortcut box, then press keys (e.g. Ctrl+Alt+E).";
+
+    scInput.addEventListener("focus", () => {
+      isRecordingShortcut = true;
+      scHint.textContent = "Press key combination now (Esc to cancel)...";
+    });
+    scInput.addEventListener("blur", () => {
+      isRecordingShortcut = false;
+      scInput.value = currentSettings.shortcut || DEFAULT_UI_SETTINGS.shortcut;
+      scHint.textContent = "Click shortcut box, then press keys (e.g. Ctrl+Alt+E).";
+    });
+    scInput.addEventListener("keydown", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key === "Escape") {
+        scInput.blur();
+        return;
+      }
+      const formatted = formatShortcutFromEvent(e);
+      if (!formatted) return;
+      if (formatted === "Ctrl+E") {
+        scHint.textContent = "Warning: Ctrl+E is used by Quick Open; Ctrl+Alt+E recommended.";
+      }
+      currentSettings.shortcut = formatted;
+      scInput.value = formatted;
+      refreshAllTooltips();
+      saveSettingsPatch({ shortcut: formatted }, statusEl);
+      isRecordingShortcut = false;
+      scInput.blur();
+    });
+
+    const resetBtn = document.createElement("button");
+    resetBtn.type = "button";
+    resetBtn.className = "agy-sp-mini-btn";
+    resetBtn.textContent = "Reset";
+    resetBtn.addEventListener("click", () => {
+      currentSettings.shortcut = DEFAULT_UI_SETTINGS.shortcut;
+      scInput.value = DEFAULT_UI_SETTINGS.shortcut;
+      refreshAllTooltips();
+      saveSettingsPatch({ shortcut: DEFAULT_UI_SETTINGS.shortcut }, statusEl);
+    });
+
+    scWrap.appendChild(scInput);
+    scWrap.appendChild(resetBtn);
+    scRow.appendChild(scLabel);
+    scRow.appendChild(scWrap);
+    pop.appendChild(scRow);
+    pop.appendChild(scHint);
+
+    pop.appendChild(
+      buildSelectRow(
+        "Output Language",
+        "outputLanguage",
+        [
+          { value: "auto", label: "Auto (Follow Draft)" },
+          { value: "id", label: "Indonesian" },
+          { value: "en", label: "English" },
+        ],
+        statusEl
+      )
+    );
+    pop.appendChild(
+      buildSelectRow(
+        "Detail Level",
+        "detailLevel",
+        [
+          { value: "concise", label: "Concise" },
+          { value: "balanced", label: "Balanced" },
+          { value: "comprehensive", label: "Comprehensive" },
+        ],
+        statusEl
+      )
+    );
+    pop.appendChild(buildCheckboxRow("Workspace Context", "includeWorkspaceContext", statusEl));
+    pop.appendChild(buildCheckboxRow("Chat History Context", "includeConversationContext", statusEl));
+    pop.appendChild(buildCheckboxRow("Status Toast", "showToast", statusEl));
+
+    const footer = document.createElement("div");
+    footer.className = "agy-sp-footer";
+    const openVsBtn = document.createElement("button");
+    openVsBtn.type = "button";
+    openVsBtn.className = "agy-sp-mini-btn";
+    openVsBtn.textContent = "Open VS Code Settings…";
+    openVsBtn.addEventListener("click", async () => {
+      try {
+        const cfg = await loadConfig(false);
+        const url = window.location.protocol.startsWith("http")
+          ? "/__enhancer/open-vscode-settings"
+          : `http://127.0.0.1:${cfg.port}/__enhancer/open-vscode-settings`;
+        await fetch(url, {
+          method: "POST",
+          headers: { "X-Enhancer-Token": cfg.token },
+        });
+        closeSettingsPopover();
+      } catch {
+        // ignore
+      }
+    });
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "agy-sp-mini-btn";
+    closeBtn.textContent = "Close";
+    closeBtn.addEventListener("click", closeSettingsPopover);
+    footer.appendChild(openVsBtn);
+    footer.appendChild(closeBtn);
+    pop.appendChild(footer);
+
+    document.body.appendChild(pop);
+    const rect = anchorBtn.getBoundingClientRect();
+    const popRect = pop.getBoundingClientRect();
+    const topPos = Math.max(12, rect.top - popRect.height - 8);
+    const rightPos = Math.max(12, window.innerWidth - rect.right);
+    pop.style.top = `${topPos}px`;
+    pop.style.right = `${rightPos}px`;
+    activePopoverEl = pop;
   }
 
   function findRightActionGroup(inputBox) {
@@ -535,12 +1039,28 @@
 
     ensureStyle();
 
+    const group = document.createElement("div");
+    group.className = "agy-enhance-group";
+
+    const settingsBtn = document.createElement("button");
+    settingsBtn.type = "button";
+    settingsBtn.className = "agy-settings-btn";
+    settingsBtn.setAttribute("data-testid", "enhance-settings-button");
+    settingsBtn.setAttribute("aria-label", "Prompt Enhancer Settings");
+    settingsBtn.title = "Prompt Enhancer Settings";
+    settingsBtn.appendChild(createGearSvg());
+    settingsBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      toggleSettingsPopover(settingsBtn);
+    });
+
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "agy-enhance-btn";
     btn.setAttribute("data-testid", "enhance-prompt-button");
     btn.setAttribute("aria-label", "Enhance Prompt");
-    btn.title = "Enhance Prompt";
+    btn.title = formatEnhanceTooltip();
     btn.appendChild(createSparkleSvg());
 
     btn.addEventListener("click", (e) => {
@@ -548,8 +1068,15 @@
       e.stopPropagation();
       handleEnhanceClick(btn, inputBox, inputEl);
     });
+    btn.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      toggleSettingsPopover(btn);
+    });
 
-    target.rightGroup.insertBefore(btn, target.anchor || null);
+    group.appendChild(settingsBtn);
+    group.appendChild(btn);
+    target.rightGroup.insertBefore(group, target.anchor || null);
     syncButtonDisabled(btn, inputEl);
 
     if (inputEl.dataset.agyEnhanceBound !== "1") {
@@ -560,6 +1087,77 @@
       } else {
         inputEl.addEventListener("input", () => syncButtonDisabled(btn, inputEl));
       }
+    }
+  }
+
+  function triggerEnhanceForActiveInput() {
+    const activeEl = document.activeElement;
+    let inputBox = activeEl && activeEl.closest ? activeEl.closest('[data-testid="agent-input-box"]') : null;
+    if (!inputBox) {
+      const boxes = document.querySelectorAll('[data-testid="agent-input-box"]');
+      if (boxes.length > 0) inputBox = boxes[boxes.length - 1];
+    }
+    if (!inputBox) return false;
+    const btn = inputBox.querySelector('[data-testid="enhance-prompt-button"]');
+    const inputEl = inputBox.querySelector('[aria-label="Message input"][contenteditable="true"]');
+    if (!btn || !inputEl) return false;
+    handleEnhanceClick(btn, inputBox, inputEl);
+    return true;
+  }
+
+  document.addEventListener(
+    "keydown",
+    (e) => {
+      if (activePopoverEl && e.key === "Escape" && !isRecordingShortcut) {
+        closeSettingsPopover();
+        return;
+      }
+      if (isRecordingShortcut || !currentSettings.shortcutEnabled) return;
+      if (matchesShortcutEvent(e, currentSettings.shortcut)) {
+        if (triggerEnhanceForActiveInput()) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      }
+    },
+    true
+  );
+
+  document.addEventListener("mousedown", (e) => {
+    if (!activePopoverEl) return;
+    const target = e.target;
+    if (
+      activePopoverEl.contains(target) ||
+      (target && target.closest && target.closest('[data-testid="enhance-settings-button"]'))
+    ) {
+      return;
+    }
+    closeSettingsPopover();
+  });
+
+  if (window.location.protocol.startsWith("http") && typeof EventSource === "function") {
+    try {
+      const es = new EventSource("/__enhancer/events");
+      es.addEventListener("settings", (evt) => {
+        try {
+          const parsed = JSON.parse(evt.data || "{}");
+          currentSettings = { ...DEFAULT_UI_SETTINGS, ...parsed };
+          refreshAllTooltips();
+        } catch {
+          // ignore
+        }
+      });
+      es.addEventListener("enhance", () => {
+        triggerEnhanceForActiveInput();
+      });
+      es.addEventListener("open-settings", () => {
+        const gearBtn =
+          document.querySelector('[data-testid="enhance-settings-button"]') ||
+          document.querySelector('[data-testid="enhance-prompt-button"]');
+        if (gearBtn) toggleSettingsPopover(gearBtn);
+      });
+    } catch {
+      // ignore
     }
   }
 
