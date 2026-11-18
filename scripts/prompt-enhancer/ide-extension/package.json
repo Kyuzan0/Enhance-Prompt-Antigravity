@@ -1,0 +1,46 @@
+{
+  "name": "antigravity-prompt-enhancer",
+  "displayName": "Antigravity IDE Prompt Enhancer",
+  "description": "Adds an Enhance Prompt button next to the Send button in Antigravity IDE while preserving @mentions and attachments, with self-healing IDE update protection.",
+  "version": "1.0.0",
+  "publisher": "local",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "*"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "antigravityEnhancer.reinstallHook",
+        "title": "Prompt Enhancer: Reinstall / Repair IDE UI Hook"
+      }
+    ],
+    "configuration": {
+      "title": "Antigravity Prompt Enhancer",
+      "properties": {
+        "antigravityPromptEnhancer.proxyPort": {
+          "type": "integer",
+          "default": 47831,
+          "description": "Preferred loopback port for the local iframe proxy and enhance endpoint (falls back to an ephemeral port if busy). Overridden by AGY_ENHANCER_PORT."
+        },
+        "antigravityPromptEnhancer.cliPath": {
+          "type": "string",
+          "default": "",
+          "description": "Optional path to the native Antigravity CLI binary. Overridden by AGY_CLI_BIN."
+        },
+        "antigravityPromptEnhancer.timeoutMs": {
+          "type": "integer",
+          "default": 60000,
+          "description": "Timeout in milliseconds for running agy -p during prompt enhancement. Overridden by AGY_ENHANCER_TIMEOUT_MS."
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,46 @@
+# Documentation & runbooks (kept locally, excluded from GitHub upload)
+README.md
+**/README.md
+RUNBOOK_*.md
+
+# Tests, smoke scripts, test specs, and binary test fixtures
+*_test.go
+*.test.*
+*.spec.*
+*smoke*.*
+*e2e*.*
+*probe*.*
+test/
+tests/
+__tests__/
+testdata/
+
+# Build & binary artifacts
+*.exe
+*.dll
+*.bak
+*.enhancer.bak
+*.old
+wrapper/build/
+scripts/prompt-enhancer/wrapper/build/
+
+# Temporary probes, backups, logs, PIDs, and local session captures
+temp/
+*.log
+*.pid
+daemon.out.log
+daemon.err.log
+daemon.log
+daemon.pid
+e2e-screen-ready.txt
+enhance-ide-hook-config.json
+
+# Local runtime config overrides (keep config.example.json & defaults)
+enhancer-config.json
+.env
+.env.*
+
+# Dependencies & OS/editor noise
+node_modules/
+.DS_Store
+Thumbs.db
