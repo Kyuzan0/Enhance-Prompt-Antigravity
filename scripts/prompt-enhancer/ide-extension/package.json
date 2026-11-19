@@ -1,10 +1,25 @@
 {
-  "name": "antigravity-prompt-enhancer",
+  "name": "ag-ide-prompt-enhancer",
   "displayName": "Antigravity IDE Prompt Enhancer",
   "description": "Adds an Enhance Prompt button, customizable keyboard shortcut, and settings in Antigravity IDE while preserving @mentions and attachments.",
   "version": "1.1.0",
-  "publisher": "local",
+  "publisher": "kyuzan0",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Kyuzan0/Enhance-Prompt-Antigravity.git"
+  },
+  "homepage": "https://github.com/Kyuzan0/Enhance-Prompt-Antigravity#readme",
+  "bugs": {
+    "url": "https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/issues"
+  },
+  "keywords": [
+    "antigravity",
+    "prompt",
+    "enhancer",
+    "ai",
+    "shortcut"
+  ],
   "engines": {
     "vscode": "^1.80.0"
   },

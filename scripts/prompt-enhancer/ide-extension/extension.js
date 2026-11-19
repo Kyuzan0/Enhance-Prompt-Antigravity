@@ -976,7 +976,8 @@ function activate(context) {
       if (sseClients.size > 0) {
         broadcastSse("open-settings", {});
       } else {
-        vscode.commands.executeCommand("workbench.action.openSettings", "@ext:local.antigravity-prompt-enhancer");
+        const extId = (context && context.extension && context.extension.id) || "kyuzan0.ag-ide-prompt-enhancer";
+        vscode.commands.executeCommand("workbench.action.openSettings", `@ext:${extId}`);
       }
     }),
     vscode.commands.registerCommand("antigravityEnhancer.reinstallHook", () => {

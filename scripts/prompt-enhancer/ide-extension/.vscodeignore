@@ -1,0 +1,6 @@
+*.test.*
+*.vsix
+*.log
+*.bak
+install-ide-enhancer.ps1
+.gitignore
