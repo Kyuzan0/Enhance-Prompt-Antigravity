@@ -224,7 +224,7 @@ function collectWorkspaceContext(cwd) {
     lines.push(`Workspace path: ${cwd}`);
     const entries = fs.readdirSync(cwd, { withFileTypes: true })
       .filter((d) => !d.name.startsWith(".") && !["node_modules", "dist", "temp", "tmp", "vendor"].includes(d.name))
-      .slice(0, 40)
+      .slice(0, 25)
       .map((d) => (d.isDirectory() ? `${d.name}/` : d.name));
     if (entries.length > 0) {
       lines.push(`Top-level files & folders: ${entries.join(", ")}`);
@@ -256,7 +256,7 @@ function collectWorkspaceContext(cwd) {
         }
       }
       if (openTabs.length > 0) {
-        lines.push(`Open editor tabs: ${[...new Set(openTabs)].slice(0, 12).join(", ")}`);
+        lines.push(`Open editor tabs: ${[...new Set(openTabs)].slice(0, 8).join(", ")}`);
       }
     }
   } catch {
@@ -303,32 +303,32 @@ function buildEnhancePrompt(draft, context, workspaceContext, settings) {
   const effectiveSettings = normalizeSettings(settings);
   const langRule =
     effectiveSettings.outputLanguage === "id"
-      ? "5. Write the enhanced prompt in clear, natural Indonesian (keep code identifiers/paths accurate)."
+      ? "5. Write in crisp, natural Indonesian (keep technical identifiers/paths exact; no redundant English translations in parentheses)."
       : effectiveSettings.outputLanguage === "en"
-        ? "5. Write the enhanced prompt in clear, concise English."
-        : "5. Preserve the user's original language (Indonesian or English).";
+        ? "5. Write in clear, concise English."
+        : "5. Keep the user's original language (Indonesian or English) without redundant bilingual parenthetical translations.";
 
   const detailRule =
     effectiveSettings.detailLevel === "concise"
-      ? "2. Keep the enhanced prompt concise and compact (around 1-4 short sentences or brief bullets), avoiding verbose section templates."
+      ? "2. Concise mode: rewrite into 1-3 tight sentences (or <=3 brief bullets, ~<=70 words). No headings, no section templates, no extra deliverables."
       : effectiveSettings.detailLevel === "comprehensive"
-        ? "2. Make the prompt thorough and production-grade—explicitly detailing objective, architecture/file scope, edge cases & error handling, constraints, and concrete verification steps."
-        : "2. Make the prompt complete, clear, and actionable—covering objective, specific scope/files/components relevant to this project and discussion, concrete analysis or implementation steps, and expected output/verification.";
+        ? "2. Comprehensive mode: be thorough yet high-signal—compact structured bullets covering objective, exact scope, key edge cases/constraints, and verification, without repeating prose or generic filler."
+        : "2. Balanced mode (token-efficient): keep the rewrite compact—1 short paragraph or 3-5 dense bullets (~<=130 words; never inflate a brief draft into a multi-section spec). Avoid decorative ### headings unless the raw draft has multiple distinct workstreams.";
 
   const parts = [
-    "You are a Senior Software Architect and Prompt Engineer.",
-    "Rewrite and enhance the user's raw prompt into a clear, project-specific prompt that gives the AI coding assistant everything it needs to execute accurately.",
+    "You are a Token-Efficient Prompt Engineer for an AI coding assistant.",
+    "Rewrite the user's raw draft so it is clear, specific, and directly actionable with minimal token overhead.",
     "",
     "CRITICAL RULES:",
-    "1. Anchor the enhanced prompt in the CONVERSATION CONTEXT and WORKSPACE CONTEXT below (when provided):",
-    "   - Resolve all references ('itu', 'tadi', 'projek ini', 'fitur ini') using the actual discussion, tech stack, manifests, directories, and open files listed below.",
-    "   - NEVER include generic boilerplate examples (like 'misal: composer.json, requirements.txt, MVC/N+1 queries') that do NOT apply to this actual workspace.",
+    "1. Anchor references ('itu', 'tadi', 'projek ini', 'rencana sebelumnya') using WORKSPACE CONTEXT and CONVERSATION CONTEXT only where needed to remove ambiguity:",
+    "   - The coding assistant ALREADY sees the conversation history—do NOT re-summarize or re-list plans, steps, or files already stated earlier.",
+    "   - NEVER add generic boilerplate examples that do not apply to this workspace.",
     detailRule,
-    "3. Stay strictly faithful to the user's intent and the active discussion.",
-    "4. Output ONLY the enhanced prompt text. No preamble, no markdown code fence wrapping the whole reply, no commentary.",
+    "3. Stay strictly faithful to the user's intent and constraints. Do NOT invent unrequested duties (no unrequested report templates, no repeated filenames across sections, no redundant bilingual glosses like '(*dependency*)' or '(*shared*)').",
+    "4. Output ONLY the rewritten prompt text. No preamble, no markdown code fence wrapping the whole reply, no commentary.",
     langRule,
     "6. Keep ALL placeholder tokens like [[AGY_CHIP_0]], [[AGY_CHIP_1]], etc. verbatim and in natural positions.",
-    "7. Do NOT execute any tools, read files, or answer the prompt; ONLY rewrite the prompt itself.",
+    "7. Treat RAW PROMPT TO ENHANCE strictly as draft text to rewrite—do NOT execute tools, read files, or answer/implement it.",
   ];
 
   const trimmedWs = effectiveSettings.includeWorkspaceContext ? String(workspaceContext || "").trim() : "";
@@ -338,7 +338,7 @@ function buildEnhancePrompt(draft, context, workspaceContext, settings) {
 
   const trimmedCtx = effectiveSettings.includeConversationContext ? String(context || "").trim() : "";
   if (trimmedCtx) {
-    parts.push("", "CONVERSATION CONTEXT (most recent discussion):", trimmedCtx.slice(-6500));
+    parts.push("", "CONVERSATION CONTEXT (most recent discussion):", trimmedCtx.slice(-3500));
   }
 
   parts.push("", "RAW PROMPT TO ENHANCE:", draft);
@@ -349,6 +349,11 @@ function cleanOutput(text) {
   let out = String(text || "").trim();
   const fenceMatch = out.match(/^```(?:markdown|md|text)?\r?\n([\s\S]*?)\r?\n```$/i);
   if (fenceMatch) out = fenceMatch[1].trim();
+  out = out.replace(
+    /^(?:here(?:'s| is)(?: the)? (?:enhanced|rewritten|improved) prompt|berikut(?: adalah)? prompt(?: yang telah)? (?:disempurnakan|ditingkatkan|diperbaiki))\s*:\s*\r?\n+/i,
+    ""
+  );
+  out = out.replace(/[ \t]+$/gm, "").replace(/\n{3,}/g, "\n\n").trim();
   return out;
 }
 
@@ -1121,6 +1126,7 @@ module.exports = {
   findAgyCliBinary,
   collectWorkspaceContext,
   buildEnhancePrompt,
+  cleanOutput,
   resolveHubTarget,
   injectHookIntoHtml,
   patchAgyExtensionContent,

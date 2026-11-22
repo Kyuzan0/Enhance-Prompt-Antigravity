@@ -636,7 +636,7 @@
         const cloneInput = clone.querySelector('[data-testid="agent-input-box"]');
         if (cloneInput) cloneInput.remove();
         const raw = (clone.innerText || clone.textContent || "").replace(/\n{3,}/g, "\n\n").trim();
-        return raw.slice(-6000);
+        return raw.slice(-3200);
       }
 
       const turns = [];
@@ -650,7 +650,7 @@
         }
         const raw = (child.innerText || child.textContent || "").replace(/\n{3,}/g, "\n\n").trim();
         if (raw && raw.length > 2) {
-          turns.push(`ASSISTANT:\n${raw.length > 1800 ? raw.slice(0, 900) + "\n...\n" + raw.slice(-800) : raw}`);
+          turns.push(`ASSISTANT:\n${raw.length > 900 ? raw.slice(0, 450) + "\n...\n" + raw.slice(-400) : raw}`);
         }
       }
 
@@ -658,7 +658,7 @@
       let total = 0;
       for (let i = turns.length - 1; i >= 0; i--) {
         const t = turns[i];
-        if (total + t.length > 6000 && selected.length > 0) break;
+        if (total + t.length > 3200 && selected.length > 0) break;
         selected.unshift(t);
         total += t.length;
       }

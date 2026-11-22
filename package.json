@@ -83,7 +83,7 @@
             "comprehensive"
           ],
           "default": "balanced",
-          "description": "Detail level of the rewritten prompt: concise, balanced, or comprehensive."
+          "description": "Detail level of the rewritten prompt: concise (1-3 sentences), balanced (compact & token-efficient), or comprehensive (thorough high-signal bullets)."
         },
         "antigravityPromptEnhancer.includeWorkspaceContext": {
           "type": "boolean",
