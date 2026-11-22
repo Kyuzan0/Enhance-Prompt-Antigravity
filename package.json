@@ -2,8 +2,12 @@
   "name": "ag-ide-prompt-enhancer",
   "displayName": "Antigravity IDE Prompt Enhancer",
   "description": "Adds an Enhance Prompt button, customizable keyboard shortcut, and settings in Antigravity IDE while preserving @mentions and attachments.",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "publisher": "kyuzan0",
+  "author": {
+    "name": "Kyuzan0",
+    "url": "https://github.com/Kyuzan0"
+  },
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -13,23 +17,40 @@
   "bugs": {
     "url": "https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/issues"
   },
+  "qna": "https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/issues",
   "keywords": [
     "antigravity",
     "prompt",
     "enhancer",
+    "prompt-engineering",
     "ai",
-    "shortcut"
+    "llm",
+    "coding-assistant",
+    "shortcut",
+    "vscode-extension"
   ],
   "engines": {
     "vscode": "^1.80.0"
   },
   "categories": [
-    "Other"
+    "Other",
+    "Machine Learning"
   ],
   "activationEvents": [
     "*"
   ],
   "main": "./extension.js",
+  "scripts": {
+    "check": "node --check extension.js && node --check enhance-ide-hook.js && node --check scripts/package-vsix.mjs && node --check scripts/release.mjs",
+    "test": "node --test ide-extension.test.mjs",
+    "verify:contracts": "node verify-contracts.mjs",
+    "verify": "npm run check && npm test && npm run verify:contracts",
+    "package": "node scripts/package-vsix.mjs",
+    "build": "npm run verify && npm run package",
+    "release:patch": "node scripts/release.mjs patch",
+    "release:minor": "node scripts/release.mjs minor",
+    "release:major": "node scripts/release.mjs major"
+  },
   "contributes": {
     "commands": [
       {
@@ -43,6 +64,10 @@
       {
         "command": "antigravityEnhancer.reinstallHook",
         "title": "Prompt Enhancer: Reinstall / Repair IDE UI Hook"
+      },
+      {
+        "command": "antigravityEnhancer.about",
+        "title": "Prompt Enhancer: About & Version Info"
       }
     ],
     "keybindings": [

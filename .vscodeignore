@@ -1,10 +1,14 @@
 *.test.*
+*.spec.*
 *.vsix
 *.log
 *.bak
+*.enhancer.bak
 install-ide-enhancer.ps1
 docs/
 contracts/
+scripts/
 verify-contracts.mjs
 .gitignore
 .gitattributes
+.git/

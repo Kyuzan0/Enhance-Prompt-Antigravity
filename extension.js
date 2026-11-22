@@ -719,8 +719,130 @@ function applyEnhancerCorsHeaders(req, res, serverPort) {
   }
 }
 
+function readExtensionMetadata(context) {
+  const extPath = (context && context.extensionPath) || __dirname;
+  let pkg = {};
+  try {
+    pkg = JSON.parse(fs.readFileSync(path.join(extPath, "package.json"), "utf8"));
+  } catch {
+    pkg = {};
+  }
+  const publisher = String(pkg.publisher || "kyuzan0").trim();
+  const name = String(pkg.name || "ag-ide-prompt-enhancer").trim();
+  const version = String(pkg.version || "0.0.0").trim();
+  const displayName = String(pkg.displayName || "Antigravity IDE Prompt Enhancer").trim();
+  const authorObj = pkg.author && typeof pkg.author === "object" ? pkg.author : {};
+  const authorName = String(authorObj.name || (typeof pkg.author === "string" ? pkg.author : "") || "Kyuzan0").trim();
+  const authorUrl = String(authorObj.url || "https://github.com/Kyuzan0").trim();
+  const repoRaw = pkg.repository && typeof pkg.repository === "object" ? pkg.repository.url : pkg.repository;
+  const repoUrl = String(repoRaw || "https://github.com/Kyuzan0/Enhance-Prompt-Antigravity").replace(/\.git$/i, "").trim();
+  const homepageUrl = String(pkg.homepage || `${repoUrl}#readme`).trim();
+  const bugsUrl = String((pkg.bugs && pkg.bugs.url) || `${repoUrl}/issues`).trim();
+  const id = (context && context.extension && context.extension.id) || `${publisher}.${name}`;
+  return {
+    id,
+    name,
+    displayName,
+    version,
+    publisher,
+    authorName,
+    authorUrl,
+    repoUrl,
+    homepageUrl,
+    bugsUrl,
+    extensionPath: extPath,
+  };
+}
+
+function extractChangelogSummary(extensionPath, version) {
+  if (!extensionPath || !version) return "";
+  const clPath = path.join(extensionPath, "CHANGELOG.md");
+  if (!fs.existsSync(clPath)) return "";
+  try {
+    const raw = fs.readFileSync(clPath, "utf8").replace(/\r\n/g, "\n");
+    const pattern = new RegExp(`^## \\[${escapeRegExp(version)}\\][^\\n]*\\n([\\s\\S]*?)(?=^## \\[|(?![\\s\\S]))`, "m");
+    const match = raw.match(pattern);
+    if (!match) return "";
+    return match[1].replace(/\n\[[^\]]+\]:\s+https?:\/\/\S+\s*$/gm, "").trim();
+  } catch {
+    return "";
+  }
+}
+
+function openExternalUrl(url) {
+  if (!vscode || !url) return;
+  try {
+    vscode.env.openExternal(vscode.Uri.parse(url));
+  } catch {
+    // ignore
+  }
+}
+
+async function openChangelogDocument(meta) {
+  if (!vscode) return;
+  const clPath = path.join(meta.extensionPath, "CHANGELOG.md");
+  if (fs.existsSync(clPath)) {
+    try {
+      const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(clPath));
+      await vscode.window.showTextDocument(doc, { preview: true });
+      return;
+    } catch {
+      // fallback to GitHub
+    }
+  }
+  openExternalUrl(`${meta.repoUrl}/blob/main/CHANGELOG.md`);
+}
+
+function showAboutInfo(context) {
+  if (!vscode) return;
+  const meta = readExtensionMetadata(context);
+  const summary = extractChangelogSummary(meta.extensionPath, meta.version);
+  const firstBullet = summary
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => l.startsWith("- "));
+  const highlight = firstBullet ? ` Latest: ${firstBullet.slice(2)}` : "";
+  const msg = `${meta.displayName} v${meta.version} — Created by ${meta.authorName} (${meta.authorUrl}).${highlight}`;
+  vscode.window
+    .showInformationMessage(msg, "View Changelog", `GitHub (${meta.authorName})`, "Open Settings")
+    .then((choice) => {
+      if (choice === "View Changelog") openChangelogDocument(meta);
+      else if (choice === `GitHub (${meta.authorName})`) openExternalUrl(meta.authorUrl);
+      else if (choice === "Open Settings") {
+        vscode.commands.executeCommand("workbench.action.openSettings", `@ext:${meta.id}`);
+      }
+    });
+}
+
+function maybeNotifyWhatsNew(context, meta) {
+  if (!vscode || !context || !context.globalState) return;
+  const key = "antigravityPromptEnhancer.lastSeenVersion";
+  const lastSeen = context.globalState.get(key);
+  Promise.resolve(context.globalState.update(key, meta.version)).catch(() => {});
+  if (lastSeen && lastSeen !== meta.version) {
+    vscode.window
+      .showInformationMessage(
+        `${meta.displayName} updated to v${meta.version} (by ${meta.authorName}).`,
+        "View Changelog",
+        `GitHub (${meta.authorName})`
+      )
+      .then((choice) => {
+        if (choice === "View Changelog") openChangelogDocument(meta);
+        else if (choice === `GitHub (${meta.authorName})`) openExternalUrl(meta.authorUrl);
+      });
+  }
+}
+
 function activate(context) {
-  const extId = (context && context.extension && context.extension.id) || "kyuzan0.ag-ide-prompt-enhancer";
+  const extMeta = readExtensionMetadata(context);
+  const extId = extMeta.id;
+  const publicMeta = {
+    version: extMeta.version,
+    displayName: extMeta.displayName,
+    authorName: extMeta.authorName,
+    authorUrl: extMeta.authorUrl,
+    repoUrl: extMeta.repoUrl,
+  };
   const token = crypto.randomBytes(16).toString("hex");
   let serverPort = 0;
   let lastHubPort = 0;
@@ -917,7 +1039,7 @@ function activate(context) {
         "Cache-Control": "no-store",
         "Cross-Origin-Resource-Policy": "same-origin",
       });
-      res.end(JSON.stringify({ port: serverPort, token, settings: readAllSettings() }));
+      res.end(JSON.stringify({ port: serverPort, token, settings: readAllSettings(), meta: publicMeta }));
       return;
     }
 
@@ -934,6 +1056,7 @@ function activate(context) {
           port: serverPort,
           token,
           settings: readAllSettings(),
+          meta: publicMeta,
         })};\n`;
         res.writeHead(200, {
           "Content-Type": "application/javascript; charset=utf-8",
@@ -1090,7 +1213,6 @@ function activate(context) {
       if (sseClients.size > 0) {
         broadcastSse("open-settings", {});
       } else {
-        const extId = (context && context.extension && context.extension.id) || "kyuzan0.ag-ide-prompt-enhancer";
         vscode.commands.executeCommand("workbench.action.openSettings", `@ext:${extId}`);
       }
     }),
@@ -1102,12 +1224,21 @@ function activate(context) {
           : "Prompt Enhancer IDE hook is already up to date."
       );
     }),
+    vscode.commands.registerCommand("antigravityEnhancer.about", () => {
+      showAboutInfo(context);
+    }),
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration("antigravityPromptEnhancer")) {
         broadcastSse("settings", readAllSettings());
       }
     })
   );
+
+  try {
+    maybeNotifyWhatsNew(context, extMeta);
+  } catch {
+    // ignore
+  }
 }
 
 function deactivate() {}
@@ -1135,4 +1266,6 @@ module.exports = {
   ensureIdeHookInstalled,
   isAllowedEnhancerOrigin,
   isAllowedEnhancerRequest,
+  readExtensionMetadata,
+  extractChangelogSummary,
 };

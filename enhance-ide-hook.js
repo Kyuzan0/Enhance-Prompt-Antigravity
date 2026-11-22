@@ -17,6 +17,12 @@
   };
   let cachedConfig = null;
   let currentSettings = { ...DEFAULT_UI_SETTINGS };
+  let currentMeta = {
+    version: "",
+    displayName: "Antigravity IDE Prompt Enhancer",
+    authorName: "Kyuzan0",
+    authorUrl: "https://github.com/Kyuzan0",
+  };
   let isRecordingShortcut = false;
   let activePopoverEl = null;
   let toastTimer = null;
@@ -25,6 +31,9 @@
 
   if (window.__AGY_ENHANCER_CONFIG__ && window.__AGY_ENHANCER_CONFIG__.settings) {
     currentSettings = { ...DEFAULT_UI_SETTINGS, ...window.__AGY_ENHANCER_CONFIG__.settings };
+  }
+  if (window.__AGY_ENHANCER_CONFIG__ && window.__AGY_ENHANCER_CONFIG__.meta) {
+    currentMeta = { ...currentMeta, ...window.__AGY_ENHANCER_CONFIG__.meta };
   }
 
   function ensureStyle() {
@@ -107,6 +116,32 @@
         font-weight: 400;
         font-size: 11px;
         color: #4ade80;
+      }
+      .agy-sp-title-wrap {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .agy-sp-version {
+        font-weight: 500;
+        font-size: 10px;
+        opacity: 0.72;
+        padding: 1px 5px;
+        border-radius: 4px;
+        background: rgba(128,128,128,0.18);
+      }
+      .agy-sp-credit {
+        margin-top: 8px;
+        font-size: 10px;
+        opacity: 0.68;
+        text-align: center;
+      }
+      .agy-sp-credit a {
+        color: var(--vscode-textLink-foreground, #60a5fa);
+        text-decoration: none;
+      }
+      .agy-sp-credit a:hover {
+        text-decoration: underline;
       }
       .agy-sp-row {
         display: flex;
@@ -895,11 +930,20 @@
 
     const header = document.createElement("div");
     header.className = "agy-sp-header";
+    const titleWrap = document.createElement("span");
+    titleWrap.className = "agy-sp-title-wrap";
     const titleSpan = document.createElement("span");
     titleSpan.textContent = "Prompt Enhancer Settings";
+    titleWrap.appendChild(titleSpan);
+    if (currentMeta && currentMeta.version) {
+      const verBadge = document.createElement("span");
+      verBadge.className = "agy-sp-version";
+      verBadge.textContent = `v${currentMeta.version}`;
+      titleWrap.appendChild(verBadge);
+    }
     const statusEl = document.createElement("span");
     statusEl.className = "agy-sp-status";
-    header.appendChild(titleSpan);
+    header.appendChild(titleWrap);
     header.appendChild(statusEl);
     pop.appendChild(header);
 
@@ -1033,6 +1077,18 @@
     footer.appendChild(openVsBtn);
     footer.appendChild(closeBtn);
     pop.appendChild(footer);
+
+    const creditEl = document.createElement("div");
+    creditEl.className = "agy-sp-credit";
+    const verPrefix = currentMeta && currentMeta.version ? `v${currentMeta.version} · ` : "";
+    creditEl.appendChild(document.createTextNode(`${verPrefix}Created by `));
+    const creditLink = document.createElement("a");
+    creditLink.href = (currentMeta && currentMeta.authorUrl) || "https://github.com/Kyuzan0";
+    creditLink.target = "_blank";
+    creditLink.rel = "noopener noreferrer";
+    creditLink.textContent = (currentMeta && currentMeta.authorName) || "Kyuzan0";
+    creditEl.appendChild(creditLink);
+    pop.appendChild(creditEl);
 
     document.body.appendChild(pop);
     const rect = anchorBtn.getBoundingClientRect();

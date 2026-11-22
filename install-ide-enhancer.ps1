@@ -17,6 +17,9 @@ param(
     [string]$IdeAppRoot = $(if ($env:ANTIGRAVITY_IDE_APP_ROOT) { $env:ANTIGRAVITY_IDE_APP_ROOT } else { "" }),
 
     [Parameter()]
+    [string]$VsixPath = "",
+
+    [Parameter()]
     [switch]$Uninstall
 )
 
@@ -123,9 +126,12 @@ function Sync-ProductJsonChecksums {
 $srcDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $pkgPath = Join-Path $srcDir "package.json"
 $pkg = Get-Content -LiteralPath $pkgPath -Raw -Encoding UTF8 | ConvertFrom-Json
-$extPublisher = if ($pkg.publisher) { [string]$pkg.publisher } else { "kyuzan0" }
-$extName = if ($pkg.name) { [string]$pkg.name } else { "ag-ide-prompt-enhancer" }
-$extVersion = if ($pkg.version) { [string]$pkg.version } else { "1.1.0" }
+if (-not $pkg.publisher -or -not $pkg.name -or -not $pkg.version) {
+    throw "package.json at $pkgPath must define publisher, name, and version."
+}
+$extPublisher = [string]$pkg.publisher
+$extName = [string]$pkg.name
+$extVersion = [string]$pkg.version
 $extId = "$extPublisher.$extName"
 $legacyExtId = "local.antigravity-prompt-enhancer"
 $extFolderName = "$extId-$extVersion-universal"
@@ -206,27 +212,64 @@ if (-not (Test-Path -LiteralPath $dstDir)) {
     }
 }
 
-foreach ($f in @("package.json", "extension.js", "enhance-ide-hook.js")) {
-    $srcFile = Join-Path $srcDir $f
-    $dstFile = Join-Path $dstDir $f
-    if ($PSCmdlet.ShouldProcess($dstFile, "Copy $f")) {
-        Copy-Item -LiteralPath $srcFile -Destination $dstFile -Force
+$resolvedVsix = ""
+if ($VsixPath) {
+    if ($VsixPath -eq "auto") {
+        $candidateVsix = Join-Path $srcDir "$extName-$extVersion.vsix"
+        if (Test-Path -LiteralPath $candidateVsix -PathType Leaf) {
+            $resolvedVsix = $candidateVsix
+        } else {
+            $latestVsix = Get-ChildItem -LiteralPath $srcDir -Filter "$extName-*.vsix" -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+            if ($latestVsix) { $resolvedVsix = $latestVsix.FullName }
+        }
+    } else {
+        $resolvedVsix = $VsixPath
+    }
+    if (-not $resolvedVsix -or -not (Test-Path -LiteralPath $resolvedVsix -PathType Leaf)) {
+        throw "VSIX package not found: $VsixPath"
     }
 }
-foreach ($optFile in @("LICENSE", "README.md")) {
-    $srcOpt = Join-Path $srcDir $optFile
-    if (Test-Path -LiteralPath $srcOpt) {
-        $dstOpt = Join-Path $dstDir $optFile
-        if ($PSCmdlet.ShouldProcess($dstOpt, "Copy $optFile")) {
-            Copy-Item -LiteralPath $srcOpt -Destination $dstOpt -Force
+
+if ($resolvedVsix) {
+    if ($PSCmdlet.ShouldProcess($dstDir, "Extract $resolvedVsix into $dstDir")) {
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        $zip = [System.IO.Compression.ZipFile]::OpenRead($resolvedVsix)
+        try {
+            foreach ($entry in $zip.Entries) {
+                if (-not $entry.FullName.StartsWith("extension/") -or $entry.FullName.EndsWith("/")) { continue }
+                $rel = $entry.FullName.Substring("extension/".Length) -replace "/", "\"
+                $targetOut = Join-Path $dstDir $rel
+                $parentDir = Split-Path -Parent $targetOut
+                if (-not (Test-Path -LiteralPath $parentDir)) { New-Item -ItemType Directory -Path $parentDir -Force | Out-Null }
+                [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $targetOut, $true)
+            }
+        } finally {
+            $zip.Dispose()
+        }
+    }
+} else {
+    foreach ($f in @("package.json", "extension.js", "enhance-ide-hook.js")) {
+        $srcFile = Join-Path $srcDir $f
+        $dstFile = Join-Path $dstDir $f
+        if ($PSCmdlet.ShouldProcess($dstFile, "Copy $f")) {
+            Copy-Item -LiteralPath $srcFile -Destination $dstFile -Force
+        }
+    }
+    foreach ($optFile in @("LICENSE", "README.md", "CHANGELOG.md")) {
+        $srcOpt = Join-Path $srcDir $optFile
+        if (Test-Path -LiteralPath $srcOpt) {
+            $dstOpt = Join-Path $dstDir $optFile
+            if ($PSCmdlet.ShouldProcess($dstOpt, "Copy $optFile")) {
+                Copy-Item -LiteralPath $srcOpt -Destination $dstOpt -Force
+            }
         }
     }
 }
 
 if (Test-Path -LiteralPath $ExtensionRoot) {
-    foreach ($legacyDir in Get-ChildItem -LiteralPath $ExtensionRoot -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "$legacyExtId-*" }) {
-        if ($PSCmdlet.ShouldProcess($legacyDir.FullName, "Remove legacy extension folder")) {
-            Remove-Item -LiteralPath $legacyDir.FullName -Recurse -Force
+    foreach ($oldDir in Get-ChildItem -LiteralPath $ExtensionRoot -Directory -ErrorAction SilentlyContinue | Where-Object { ($_.Name -like "$extId-*" -and $_.Name -ne $extFolderName) -or $_.Name -like "$legacyExtId-*" }) {
+        if ($PSCmdlet.ShouldProcess($oldDir.FullName, "Remove prior/legacy extension folder")) {
+            Remove-Item -LiteralPath $oldDir.FullName -Recurse -Force
         }
     }
 }
