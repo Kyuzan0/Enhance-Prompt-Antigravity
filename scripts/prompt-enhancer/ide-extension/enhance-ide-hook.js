@@ -231,6 +231,8 @@
     return parsed;
   }
 
+  const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/i.test(navigator.platform || navigator.userAgent || "");
+
   function matchesShortcutEvent(e, shortcutStr) {
     const spec = parseShortcut(shortcutStr);
     if (!spec.key || (!spec.ctrl && !spec.alt && !spec.shift && !spec.meta)) return false;
@@ -240,13 +242,27 @@
       pressedKey === spec.key ||
       (spec.key.length === 1 && codeKey === `key${spec.key}`) ||
       (spec.key === "space" && pressedKey === " ");
-    return (
+    if (
       keyMatch &&
       Boolean(e.ctrlKey) === spec.ctrl &&
       Boolean(e.altKey) === spec.alt &&
       Boolean(e.shiftKey) === spec.shift &&
       Boolean(e.metaKey) === spec.meta
-    );
+    ) {
+      return true;
+    }
+    if (
+      IS_MAC &&
+      String(shortcutStr || "").trim().toLowerCase() === "ctrl+alt+e" &&
+      keyMatch &&
+      !e.ctrlKey &&
+      Boolean(e.altKey) &&
+      !e.shiftKey &&
+      Boolean(e.metaKey)
+    ) {
+      return true;
+    }
+    return false;
   }
 
   function formatShortcutFromEvent(e) {
@@ -479,13 +495,21 @@
 
   function logClientDiag(payload) {
     try {
+      const tok =
+        (cachedConfig && cachedConfig.token) ||
+        (window.__AGY_ENHANCER_CONFIG__ && window.__AGY_ENHANCER_CONFIG__.token) ||
+        "";
+      if (!tok) return;
       const url = window.location.protocol.startsWith("http")
         ? "/__enhancer/client-log"
         : (cachedConfig ? `http://127.0.0.1:${cachedConfig.port}/__enhancer/client-log` : "");
       if (!url) return;
       fetch(url, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "X-Enhancer-Token": tok,
+        },
         body: JSON.stringify(payload),
       }).catch(() => {});
     } catch {
@@ -692,11 +716,19 @@
   }
 
   async function handleEnhanceClick(btn, inputBox, inputEl) {
-    const editor = inputEl && inputEl.__lexicalEditor;
-    if (!editor || btn.classList.contains("agy-enhancing")) return;
+    if (!inputEl || btn.classList.contains("agy-enhancing")) return;
+    const editor = inputEl.__lexicalEditor;
 
-    const stateJson = editor.getEditorState().toJSON();
-    const { text, chips, markers } = serializeLexicalState(stateJson);
+    let stateJson = null;
+    let text = "";
+    let chips = [];
+    let markers = [];
+    if (editor) {
+      stateJson = editor.getEditorState().toJSON();
+      ({ text, chips, markers } = serializeLexicalState(stateJson));
+    } else {
+      text = inputEl.innerText || inputEl.textContent || "";
+    }
     if (!text.trim()) return;
 
     btn.classList.remove("agy-error");
@@ -709,9 +741,9 @@
       const context = extractConversationContext(inputBox);
       const res = await callEnhanceBackend({ draft: text, context, model, markers });
       if (res.enhanced && res.enhanced.trim() && res.enhanced !== text) {
-        const nextJson = deserializeToLexicalJson(res.enhanced, chips, stateJson);
         let applied = false;
-        if (typeof editor.parseEditorState === "function") {
+        if (editor && stateJson && typeof editor.parseEditorState === "function") {
+          const nextJson = deserializeToLexicalJson(res.enhanced, chips, stateJson);
           try {
             const parsed = editor.parseEditorState(JSON.stringify(nextJson));
             editor.setEditorState(parsed);
@@ -886,31 +918,36 @@
     scInput.className = "agy-sp-shortcut-input";
     scInput.value = currentSettings.shortcut || DEFAULT_UI_SETTINGS.shortcut;
     scInput.title = "Click and press desired shortcut combination";
+    const defaultShortcutHint = "Click shortcut box, then press keys (e.g. Ctrl+Alt+E).";
+    let pendingWarningHint = "";
     const scHint = document.createElement("div");
     scHint.className = "agy-sp-hint";
-    scHint.textContent = "Click shortcut box, then press keys (e.g. Ctrl+Alt+E).";
+    scHint.textContent = defaultShortcutHint;
 
     scInput.addEventListener("focus", () => {
       isRecordingShortcut = true;
+      pendingWarningHint = "";
       scHint.textContent = "Press key combination now (Esc to cancel)...";
     });
     scInput.addEventListener("blur", () => {
       isRecordingShortcut = false;
       scInput.value = currentSettings.shortcut || DEFAULT_UI_SETTINGS.shortcut;
-      scHint.textContent = "Click shortcut box, then press keys (e.g. Ctrl+Alt+E).";
+      scHint.textContent = pendingWarningHint || defaultShortcutHint;
     });
     scInput.addEventListener("keydown", (e) => {
       e.preventDefault();
       e.stopPropagation();
       if (e.key === "Escape") {
+        pendingWarningHint = "";
         scInput.blur();
         return;
       }
       const formatted = formatShortcutFromEvent(e);
       if (!formatted) return;
-      if (formatted === "Ctrl+E") {
-        scHint.textContent = "Warning: Ctrl+E is used by Quick Open; Ctrl+Alt+E recommended.";
-      }
+      pendingWarningHint =
+        formatted === "Ctrl+E"
+          ? "Warning: Ctrl+E is used by Quick Open; Ctrl+Alt+E recommended."
+          : "";
       currentSettings.shortcut = formatted;
       scInput.value = formatted;
       refreshAllTooltips();
@@ -924,6 +961,8 @@
     resetBtn.className = "agy-sp-mini-btn";
     resetBtn.textContent = "Reset";
     resetBtn.addEventListener("click", () => {
+      pendingWarningHint = "";
+      scHint.textContent = defaultShortcutHint;
       currentSettings.shortcut = DEFAULT_UI_SETTINGS.shortcut;
       scInput.value = DEFAULT_UI_SETTINGS.shortcut;
       refreshAllTooltips();

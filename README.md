@@ -7,7 +7,7 @@ Portable prompt-enhancement toolkit for **Antigravity IDE** and **Antigravity CL
 The repository provides modular integration layers depending on whether you work inside **Antigravity IDE** or the **Antigravity CLI (`agy`)** terminal:
 
 1. **Antigravity IDE Extension + Local Reverse Proxy (`scripts/prompt-enhancer/ide-extension/`)**
-   - VS Code-compatible extension (`local.antigravity-prompt-enhancer`) that places a **✦ Enhance Prompt** button and **⚙ Settings** button directly to the left of the **Send (→)** button in the IDE chat sidebar (`antigravity.panel`), preserving Lexical `@mentions` and attachment chips.
+   - VS Code-compatible extension (`kyuzan0.ag-ide-prompt-enhancer`) that places a **✦ Enhance Prompt** button and **⚙ Settings** button directly to the left of the **Send (→)** button in the IDE chat sidebar (`antigravity.panel`), preserving Lexical `@mentions` and attachment chips.
    - Supports a customizable keyboard shortcut (`Ctrl+Alt+E` / `Cmd+Alt+E` by default, configurable via Quick Settings popover or VS Code Keybindings `antigravityEnhancer.enhancePrompt`), persistent settings (`antigravityPromptEnhancer.*`), and an inline Quick Settings popover (`⚙`).
    - Because Antigravity IDE renders its chat inside a cross-origin `<iframe id="jetski-frame">` served by `agy --hub`, [extension.js](scripts/prompt-enhancer/ide-extension/extension.js) runs an HTTP + WebSocket loopback reverse proxy (default preferred port `47831`, isolated per window via `__agy_hub` query/Referer/cookie) to inject [enhance-ide-hook.js](scripts/prompt-enhancer/ide-extension/enhance-ide-hook.js), anchor prompts to active workspace & chat context, and invoke the native CLI (`agy -p`) with strict tool-deny settings. Self-heals patched IDE HTML/extension hooks on startup after IDE updates.
 2. **Antigravity CLI Plugin (`plugins/prompt-enhancer/`)**
@@ -23,7 +23,7 @@ The repository provides modular integration layers depending on whether you work
 - **PowerShell**: `5.1` or `7+` (for Windows install/build scripts)
 - **Antigravity CLI (`agy`)**: Installed on the host (`~/.gemini/bin/agy.exe` or in `PATH`)
 - **Antigravity IDE** *(for IDE integration)*: Installed in standard user/system path or set via `ANTIGRAVITY_IDE_APP_ROOT`
-- **Go**: `>= 1.22` *(only required if building or modifying `scripts/prompt-enhancer/wrapper/` from source)*
+- **Go**: `>= 1.26.4` *(only required if building or modifying `scripts/prompt-enhancer/wrapper/` from source)*
 
 ## Repository Layout
 

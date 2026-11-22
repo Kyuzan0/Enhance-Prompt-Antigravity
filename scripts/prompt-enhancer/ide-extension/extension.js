@@ -664,14 +664,67 @@ function injectHookIntoHtml(html) {
   return html + injectTag;
 }
 
+function isAllowedEnhancerOrigin(origin, serverPort) {
+  if (!origin || typeof origin !== "string") return true;
+  const trimmed = origin.trim();
+  if (!trimmed) return true;
+  if (serverPort > 0 && (trimmed === `http://127.0.0.1:${serverPort}` || trimmed === `http://localhost:${serverPort}`)) {
+    return true;
+  }
+  if (/^vscode-file:\/\/[a-zA-Z0-9._-]+$/i.test(trimmed)) return true;
+  if (/^vscode-webview:\/\/[a-zA-Z0-9._-]+$/i.test(trimmed)) return true;
+  return false;
+}
+
+function isAllowedEnhancerRequest(req, serverPort) {
+  const headers = (req && req.headers) || {};
+  const sfs = String(headers["sec-fetch-site"] || "").toLowerCase();
+  if (sfs === "cross-site") return false;
+
+  const origin = headers.origin || headers.Origin || "";
+  if (origin && !isAllowedEnhancerOrigin(origin, serverPort)) return false;
+
+  const referer = headers.referer || headers.Referer || "";
+  if (referer) {
+    if (/^vscode-(?:file|webview):\/\//i.test(referer)) {
+      return true;
+    }
+    try {
+      const u = new URL(referer);
+      if (u.protocol === "http:" || u.protocol === "https:") {
+        return isAllowedEnhancerOrigin(u.origin, serverPort);
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function applyEnhancerCorsHeaders(req, res, serverPort) {
+  const origin = (req && req.headers && (req.headers.origin || req.headers.Origin)) || "";
+  if (origin && isAllowedEnhancerOrigin(origin, serverPort)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Enhancer-Token");
+  }
+}
+
 function activate(context) {
+  const extId = (context && context.extension && context.extension.id) || "kyuzan0.ag-ide-prompt-enhancer";
   const token = crypto.randomBytes(16).toString("hex");
   let serverPort = 0;
   let lastHubPort = 0;
 
   const handleEnhancePost = (req, res) => {
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Enhancer-Token");
+    if (!isAllowedEnhancerRequest(req, serverPort)) {
+      res.writeHead(403, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "Forbidden" }));
+      return;
+    }
+    applyEnhancerCorsHeaders(req, res, serverPort);
     if (req.headers["x-enhancer-token"] !== token) {
       res.writeHead(403, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: false, error: "Forbidden" }));
@@ -720,11 +773,21 @@ function activate(context) {
 
   const server = http.createServer((req, res) => {
     if (req.method === "OPTIONS") {
-      res.writeHead(204, {
-        "Access-Control-Allow-Origin": "*",
+      const origin = req.headers.origin || req.headers.Origin || "";
+      if (origin && !isAllowedEnhancerOrigin(origin, serverPort)) {
+        res.writeHead(403, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "Forbidden" }));
+        return;
+      }
+      const optHeaders = {
         "Access-Control-Allow-Headers": "Content-Type, X-Enhancer-Token",
         "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-      });
+      };
+      if (origin) {
+        optHeaders["Access-Control-Allow-Origin"] = origin;
+        optHeaders["Vary"] = "Origin";
+      }
+      res.writeHead(204, optHeaders);
       res.end();
       return;
     }
@@ -732,9 +795,15 @@ function activate(context) {
     const reqPath = (req.url || "/").split("?")[0];
 
     if (req.method === "GET" && reqPath === "/__enhancer/events") {
+      if (!isAllowedEnhancerRequest(req, serverPort)) {
+        res.writeHead(403, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "Forbidden" }));
+        return;
+      }
       res.writeHead(200, {
         "Content-Type": "text/event-stream; charset=utf-8",
         "Cache-Control": "no-store",
+        "Cross-Origin-Resource-Policy": "same-origin",
         Connection: "keep-alive",
       });
       res.write(`event: settings\ndata: ${JSON.stringify(readAllSettings())}\n\n`);
@@ -744,17 +813,28 @@ function activate(context) {
     }
 
     if (req.method === "GET" && reqPath === "/__enhancer/settings") {
+      if (!isAllowedEnhancerRequest(req, serverPort)) {
+        res.writeHead(403, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "Forbidden" }));
+        return;
+      }
+      applyEnhancerCorsHeaders(req, res, serverPort);
       res.writeHead(200, {
         "Content-Type": "application/json",
         "Cache-Control": "no-store",
-        "Access-Control-Allow-Origin": "*",
+        "Cross-Origin-Resource-Policy": "same-origin",
       });
       res.end(JSON.stringify({ ok: true, settings: readAllSettings() }));
       return;
     }
 
     if (req.method === "POST" && reqPath === "/__enhancer/settings") {
-      res.setHeader("Access-Control-Allow-Origin", "*");
+      if (!isAllowedEnhancerRequest(req, serverPort)) {
+        res.writeHead(403, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "Forbidden" }));
+        return;
+      }
+      applyEnhancerCorsHeaders(req, res, serverPort);
       if (req.headers["x-enhancer-token"] !== token) {
         res.writeHead(403, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ ok: false, error: "Forbidden" }));
@@ -778,14 +858,19 @@ function activate(context) {
     }
 
     if (req.method === "POST" && reqPath === "/__enhancer/open-vscode-settings") {
-      res.setHeader("Access-Control-Allow-Origin", "*");
+      if (!isAllowedEnhancerRequest(req, serverPort)) {
+        res.writeHead(403, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "Forbidden" }));
+        return;
+      }
+      applyEnhancerCorsHeaders(req, res, serverPort);
       if (req.headers["x-enhancer-token"] !== token) {
         res.writeHead(403, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ ok: false, error: "Forbidden" }));
         return;
       }
       if (vscode) {
-        vscode.commands.executeCommand("workbench.action.openSettings", "@ext:local.antigravity-prompt-enhancer");
+        vscode.commands.executeCommand("workbench.action.openSettings", `@ext:${extId}`);
       }
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: true }));
@@ -793,6 +878,12 @@ function activate(context) {
     }
 
     if (req.method === "POST" && reqPath === "/__enhancer/client-log") {
+      if (!isAllowedEnhancerRequest(req, serverPort) || req.headers["x-enhancer-token"] !== token) {
+        res.writeHead(403, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "Forbidden" }));
+        return;
+      }
+      applyEnhancerCorsHeaders(req, res, serverPort);
       let body = "";
       req.on("data", (c) => { body += c; if (body.length > 32768) req.destroy(); });
       req.on("end", () => {
@@ -809,12 +900,26 @@ function activate(context) {
     }
 
     if (req.method === "GET" && reqPath === "/__enhancer/config.json") {
-      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+      if (!isAllowedEnhancerRequest(req, serverPort)) {
+        res.writeHead(403, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "Forbidden" }));
+        return;
+      }
+      res.writeHead(200, {
+        "Content-Type": "application/json",
+        "Cache-Control": "no-store",
+        "Cross-Origin-Resource-Policy": "same-origin",
+      });
       res.end(JSON.stringify({ port: serverPort, token, settings: readAllSettings() }));
       return;
     }
 
     if (req.method === "GET" && reqPath === "/__enhancer/hook.js") {
+      if (!isAllowedEnhancerRequest(req, serverPort)) {
+        res.writeHead(403, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "Forbidden" }));
+        return;
+      }
       try {
         const hookPath = path.join(context.extensionPath, HOOK_SCRIPT_NAME);
         const hookBody = fs.readFileSync(hookPath, "utf8");
@@ -826,6 +931,8 @@ function activate(context) {
         res.writeHead(200, {
           "Content-Type": "application/javascript; charset=utf-8",
           "Cache-Control": "no-store",
+          "Cross-Origin-Resource-Policy": "same-origin",
+          "X-Content-Type-Options": "nosniff",
         });
         res.end(prefix + hookBody);
       } catch (err) {
@@ -1018,4 +1125,6 @@ module.exports = {
   computeFileChecksum,
   syncProductJsonChecksums,
   ensureIdeHookInstalled,
+  isAllowedEnhancerOrigin,
+  isAllowedEnhancerRequest,
 };

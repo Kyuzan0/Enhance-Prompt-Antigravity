@@ -121,8 +121,14 @@ function Sync-ProductJsonChecksums {
 }
 
 $srcDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$extId = "local.antigravity-prompt-enhancer"
-$extFolderName = "local.antigravity-prompt-enhancer-1.0.0-universal"
+$pkgPath = Join-Path $srcDir "package.json"
+$pkg = Get-Content -LiteralPath $pkgPath -Raw -Encoding UTF8 | ConvertFrom-Json
+$extPublisher = if ($pkg.publisher) { [string]$pkg.publisher } else { "kyuzan0" }
+$extName = if ($pkg.name) { [string]$pkg.name } else { "ag-ide-prompt-enhancer" }
+$extVersion = if ($pkg.version) { [string]$pkg.version } else { "1.1.0" }
+$extId = "$extPublisher.$extName"
+$legacyExtId = "local.antigravity-prompt-enhancer"
+$extFolderName = "$extId-$extVersion-universal"
 $dstDir = Join-Path $ExtensionRoot $extFolderName
 $extJsonPath = Join-Path $ExtensionRoot "extensions.json"
 $resolvedAppRoot = Resolve-IdeAppRoot -ExplicitRoot $IdeAppRoot
@@ -164,7 +170,7 @@ if ($Uninstall) {
         $raw = Get-Content -LiteralPath $extJsonPath -Raw -Encoding UTF8
         if ($raw -and $raw.Trim()) {
             $parsed = $raw | ConvertFrom-Json
-            $kept = @($parsed | Where-Object { $_.identifier.id -ne $extId })
+            $kept = @($parsed | Where-Object { $_.identifier.id -ne $extId -and $_.identifier.id -ne $legacyExtId })
             if ($PSCmdlet.ShouldProcess($extJsonPath, "Unregister $extId")) {
                 Write-Utf8NoBom -Path $extJsonPath -Content ($kept | ConvertTo-Json -Depth 8 -Compress)
             }
@@ -174,6 +180,15 @@ if ($Uninstall) {
     if ((Test-Path -LiteralPath $dstDir) -and $PSCmdlet.ShouldProcess($dstDir, "Remove installed extension folder")) {
         Remove-Item -LiteralPath $dstDir -Recurse -Force
         Write-Host "Removed $dstDir" -ForegroundColor Green
+    }
+
+    if (Test-Path -LiteralPath $ExtensionRoot) {
+        foreach ($oldDir in Get-ChildItem -LiteralPath $ExtensionRoot -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "$extId-*" -or $_.Name -like "$legacyExtId-*" }) {
+            if ($PSCmdlet.ShouldProcess($oldDir.FullName, "Remove prior/legacy extension folder")) {
+                Remove-Item -LiteralPath $oldDir.FullName -Recurse -Force
+                Write-Host "Removed $($oldDir.FullName)" -ForegroundColor Green
+            }
+        }
     }
 
     Write-Host "[IDE ENHANCER UNINSTALLED]" -ForegroundColor Green
@@ -198,6 +213,23 @@ foreach ($f in @("package.json", "extension.js", "enhance-ide-hook.js")) {
         Copy-Item -LiteralPath $srcFile -Destination $dstFile -Force
     }
 }
+foreach ($optFile in @("LICENSE", "README.md")) {
+    $srcOpt = Join-Path $srcDir $optFile
+    if (Test-Path -LiteralPath $srcOpt) {
+        $dstOpt = Join-Path $dstDir $optFile
+        if ($PSCmdlet.ShouldProcess($dstOpt, "Copy $optFile")) {
+            Copy-Item -LiteralPath $srcOpt -Destination $dstOpt -Force
+        }
+    }
+}
+
+if (Test-Path -LiteralPath $ExtensionRoot) {
+    foreach ($legacyDir in Get-ChildItem -LiteralPath $ExtensionRoot -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "$legacyExtId-*" }) {
+        if ($PSCmdlet.ShouldProcess($legacyDir.FullName, "Remove legacy extension folder")) {
+            Remove-Item -LiteralPath $legacyDir.FullName -Recurse -Force
+        }
+    }
+}
 
 # Register in extensions.json so Antigravity IDE loads it immediately.
 $entries = @()
@@ -206,9 +238,9 @@ if (Test-Path -LiteralPath $extJsonPath) {
     if ($raw -and $raw.Trim()) {
         $parsed = $raw | ConvertFrom-Json
         if ($parsed -is [System.Array]) {
-            $entries = @($parsed | Where-Object { $_.identifier.id -ne $extId })
+            $entries = @($parsed | Where-Object { $_.identifier.id -ne $extId -and $_.identifier.id -ne $legacyExtId })
         } elseif ($parsed) {
-            if ($parsed.identifier.id -ne $extId) { $entries = @($parsed) }
+            if ($parsed.identifier.id -ne $extId -and $parsed.identifier.id -ne $legacyExtId) { $entries = @($parsed) }
         }
     }
 }
@@ -216,7 +248,7 @@ if (Test-Path -LiteralPath $extJsonPath) {
 $posixPath = "/" + ($dstDir -replace "\\", "/")
 $newEntry = [ordered]@{
     identifier = @{ id = $extId }
-    version = "1.0.0"
+    version = $extVersion
     location = @{
         "`$mid" = 1
         fsPath = $dstDir
