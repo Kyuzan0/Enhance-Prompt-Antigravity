@@ -356,7 +356,9 @@ function runEnhanceCli({ draft, context, model, cwd, settings }) {
   return new Promise((resolve, reject) => {
     const agyBin = findAgyCliBinary();
     if (!agyBin) {
-      return reject(new Error("Native agy CLI binary not found in ~/.gemini/bin/agy.exe"));
+      return reject(
+        new Error("Native agy CLI binary not found (install agy CLI or set antigravityPromptEnhancer.cliPath / AGY_CLI_BIN)")
+      );
     }
 
     const effectiveSettings = normalizeSettings(settings || readAllSettings());

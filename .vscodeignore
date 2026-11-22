@@ -3,4 +3,8 @@
 *.log
 *.bak
 install-ide-enhancer.ps1
+docs/
+contracts/
+verify-contracts.mjs
 .gitignore
+.gitattributes
