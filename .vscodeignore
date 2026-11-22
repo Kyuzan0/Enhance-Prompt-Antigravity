@@ -12,3 +12,5 @@ verify-contracts.mjs
 .gitignore
 .gitattributes
 .git/
+.githooks/
+AGENTS.md

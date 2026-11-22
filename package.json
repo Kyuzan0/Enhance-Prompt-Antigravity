@@ -41,12 +41,13 @@
   ],
   "main": "./extension.js",
   "scripts": {
-    "check": "node --check extension.js && node --check enhance-ide-hook.js && node --check scripts/package-vsix.mjs && node --check scripts/release.mjs",
+    "check": "node --check extension.js && node --check enhance-ide-hook.js && node --check scripts/package-vsix.mjs && node --check scripts/release.mjs && node --check scripts/auto-bump-on-commit.mjs",
     "test": "node --test ide-extension.test.mjs",
     "verify:contracts": "node verify-contracts.mjs",
     "verify": "npm run check && npm test && npm run verify:contracts",
     "package": "node scripts/package-vsix.mjs",
     "build": "npm run verify && npm run package",
+    "hooks:install": "git config core.hooksPath .githooks",
     "release:patch": "node scripts/release.mjs patch",
     "release:minor": "node scripts/release.mjs minor",
     "release:major": "node scripts/release.mjs major"
