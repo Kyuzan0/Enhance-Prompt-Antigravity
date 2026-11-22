@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-11-22
+
+### Added
+- add automated release git hook and version bumping script
+
 ## [1.2.0] - 2026-11-22
 
 ### Added
@@ -37,7 +42,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial release of Antigravity IDE Prompt Enhancer with in-chat **✦ Enhance Prompt** button, loopback reverse proxy, multi-window `__agy_hub` routing, Lexical `@mention`/chip preservation, and strict tool-deny `agy -p` execution.
 
-[Unreleased]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/releases/tag/v1.0.0
