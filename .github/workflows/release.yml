@@ -6,12 +6,11 @@ on:
       - "v*"
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 jobs:
-  release:
+  build-and-release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -27,17 +26,58 @@ jobs:
       - name: Build VSIX package
         run: npm run package
 
+      - name: Upload VSIX build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vsix-package
+          path: build/ag-ide-prompt-enhancer-*.vsix
+          if-no-files-found: error
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: build/ag-ide-prompt-enhancer-*.vsix
           generate_release_notes: true
 
-      - name: Publish to Open VSX Registry
-        if: ${{ secrets.OVSX_PAT != '' }}
-        env:
-          OVSX_PAT: ${{ secrets.OVSX_PAT }}
-        run: npx --yes ovsx publish build/ag-ide-prompt-enhancer-*.vsix -p "$OVSX_PAT"
+  publish-openvsx:
+    needs: build-and-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Download VSIX build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: vsix-package
+          path: build
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Publish to Open VSX via Trusted Publishing (OIDC)
+        run: npx --yes ovsx@latest publish build/ag-ide-prompt-enhancer-*.vsix
+
+  publish-vs-marketplace:
+    needs: build-and-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Download VSIX build artifact
+        if: ${{ secrets.VSCE_PAT != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: vsix-package
+          path: build
+
+      - name: Setup Node.js
+        if: ${{ secrets.VSCE_PAT != '' }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
 
       - name: Publish to Visual Studio Marketplace
         if: ${{ secrets.VSCE_PAT != '' }}

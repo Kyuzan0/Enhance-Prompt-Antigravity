@@ -66,6 +66,16 @@ Opsi tambahan pada [`scripts/release.mjs`](scripts/release.mjs):
 - `--from-git`: isi entri changelog otomatis dari riwayat `git log`.
 - `--tag`: buat tag Git `vX.Y.Z` otomatis jika working tree sudah bersih.
 
+### Publikasi Otomatis (Open VSX Trusted Publishing & GitHub Releases)
+
+Push tag `v*` akan memicu [`.github/workflows/release.yml`](.github/workflows/release.yml) untuk memverifikasi, membangun `build/ag-ide-prompt-enhancer-<version>.vsix`, membuat GitHub Release, dan mem-publish ke **Open VSX** tanpa PAT melalui **OIDC Trusted Publishing**:
+- **Provider:** `GitHub Actions`
+- **Repository:** `Kyuzan0/Enhance-Prompt-Antigravity`
+- **Workflow:** `release.yml`
+- **Extension:** `kyuzan0.ag-ide-prompt-enhancer`
+
+*(Catatan: Rilis perdana ke Open VSX harus di-publish sekali terlebih dahulu dengan PAT sebelum OIDC Trusted Publishing aktif. Untuk Visual Studio Marketplace, tambahkan secret `VSCE_PAT` opsional di repository GitHub.)*
+
 ## Konfigurasi & Environment Variables
 
 | Variable / Setting | Default | Deskripsi |
