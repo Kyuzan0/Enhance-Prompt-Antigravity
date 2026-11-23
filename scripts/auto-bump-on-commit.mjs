@@ -54,6 +54,18 @@ function classifyCommit(subject, body, stagedFiles) {
     return null;
   }
 
+  const runtimeFiles = new Set([
+    'extension.js',
+    'enhance-ide-hook.js',
+    'package.json',
+    'install-ide-enhancer.ps1',
+    'install-ide-enhancer.sh',
+  ]);
+  const touchesRuntime = stagedFiles.some((f) => runtimeFiles.has(f));
+  if (!touchesRuntime && process.env.FORCE_AUTO_RELEASE !== '1') {
+    return null;
+  }
+
   const isBreaking = /BREAKING CHANGE/i.test(body) || /^[a-z]+(?:\([^)]*\))?!:/i.test(subject);
   const convMatch = subject.match(/^([a-z]+)(?:\(([^)]*)\))?(!)?:\s*(.+)$/i);
 
@@ -69,8 +81,7 @@ function classifyCommit(subject, body, stagedFiles) {
 
   if (isBreaking) return { bump: 'major', section: '### Changed', desc: subject };
 
-  const runtimeFiles = new Set(['extension.js', 'enhance-ide-hook.js', 'package.json', 'install-ide-enhancer.ps1']);
-  if (stagedFiles.some((f) => runtimeFiles.has(f))) {
+  if (touchesRuntime) {
     return { bump: 'patch', section: '### Changed', desc: subject };
   }
   return null;
@@ -153,6 +164,24 @@ function main() {
 
   execFileSync('git', ['add', 'package.json', 'CHANGELOG.md'], { cwd: rootDir, stdio: 'inherit' });
   console.log(`[auto-release] Bumped ${prevVersion} -> ${nextVersion} (${plan.bump}) and updated CHANGELOG.md`);
+
+  if (process.env.SKIP_AUTO_VERIFY !== '1') {
+    for (const args of [
+      ['--check', 'extension.js'],
+      ['--check', 'enhance-ide-hook.js'],
+      ['--check', 'scripts/package-vsix.mjs'],
+      ['--check', 'scripts/release.mjs'],
+      ['--check', 'scripts/auto-bump-on-commit.mjs'],
+      ['--test', 'ide-extension.test.mjs'],
+      ['verify-contracts.mjs'],
+    ]) {
+      execFileSync(process.execPath, args, {
+        cwd: rootDir,
+        stdio: 'inherit',
+        env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+      });
+    }
+  }
 
   if (process.env.SKIP_AUTO_BUILD !== '1') {
     execFileSync(process.execPath, ['scripts/package-vsix.mjs'], {

@@ -151,6 +151,7 @@ function main() {
   runNode(['--check', 'enhance-ide-hook.js']);
   runNode(['--check', 'scripts/package-vsix.mjs']);
   runNode(['--check', 'scripts/release.mjs']);
+  runNode(['--check', 'scripts/auto-bump-on-commit.mjs']);
   runNode(['--test', 'ide-extension.test.mjs']);
   runNode(['verify-contracts.mjs']);
 

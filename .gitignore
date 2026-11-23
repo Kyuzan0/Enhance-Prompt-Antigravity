@@ -3,6 +3,7 @@
 *.log
 *.bak
 *.enhancer.bak
+build/
 enhance-ide-hook-config.json
 
 # Tests & local runbooks

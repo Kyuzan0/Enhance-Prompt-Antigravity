@@ -1,8 +1,10 @@
 // Antigravity IDE UI Hook for Enhance Prompt button.
 // Trusted-Types safe: uses DOM APIs only (no innerHTML / eval).
 (function () {
-  if (window.__agyEnhanceIdeHookLoaded) return;
-  window.__agyEnhanceIdeHookLoaded = true;
+  if (typeof window !== "undefined") {
+    if (window.__agyEnhanceIdeHookLoaded) return;
+    window.__agyEnhanceIdeHookLoaded = true;
+  }
 
   const CHIP_TOKEN_PREFIX = "[[AGY_CHIP_";
   const CHIP_TOKEN_SUFFIX = "]]";
@@ -11,6 +13,8 @@
     shortcut: "Ctrl+Alt+E",
     outputLanguage: "auto",
     detailLevel: "balanced",
+    preset: "general",
+    customInstructions: "",
     includeWorkspaceContext: true,
     includeConversationContext: true,
     showToast: true,
@@ -28,11 +32,13 @@
   let toastTimer = null;
   let toastEl = null;
   let styleInjected = false;
+  let activeAbortController = null;
+  let lastSnapshot = null;
 
-  if (window.__AGY_ENHANCER_CONFIG__ && window.__AGY_ENHANCER_CONFIG__.settings) {
+  if (typeof window !== "undefined" && window.__AGY_ENHANCER_CONFIG__ && window.__AGY_ENHANCER_CONFIG__.settings) {
     currentSettings = { ...DEFAULT_UI_SETTINGS, ...window.__AGY_ENHANCER_CONFIG__.settings };
   }
-  if (window.__AGY_ENHANCER_CONFIG__ && window.__AGY_ENHANCER_CONFIG__.meta) {
+  if (typeof window !== "undefined" && window.__AGY_ENHANCER_CONFIG__ && window.__AGY_ENHANCER_CONFIG__.meta) {
     currentMeta = { ...currentMeta, ...window.__AGY_ENHANCER_CONFIG__.meta };
   }
 
@@ -205,6 +211,9 @@
       .agy-toast-pill {
         position: fixed;
         z-index: 99998;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
         padding: 5px 10px;
         border-radius: 9999px;
         background: var(--vscode-editorWidget-background, #1f2228);
@@ -216,6 +225,37 @@
         pointer-events: none;
         opacity: 0;
         transition: opacity 0.18s ease;
+      }
+      .agy-toast-pill.has-undo {
+        pointer-events: auto;
+      }
+      .agy-toast-undo {
+        background: rgba(96, 165, 250, 0.2);
+        color: #93c5fd;
+        border: 1px solid rgba(96, 165, 250, 0.4);
+        border-radius: 9999px;
+        padding: 1px 7px;
+        font-size: 10px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .agy-toast-undo:hover {
+        background: rgba(96, 165, 250, 0.35);
+      }
+      .agy-sp-text-input {
+        width: 100%;
+        box-sizing: border-box;
+        margin-top: 4px;
+        background: var(--vscode-input-background, #14161a);
+        color: var(--vscode-input-foreground, #e5e7eb);
+        border: 1px solid var(--vscode-input-border, rgba(255,255,255,0.18));
+        border-radius: 4px;
+        padding: 4px 6px;
+        font-size: 11px;
+        outline: none;
+      }
+      .agy-sp-text-input:focus {
+        border-color: #60a5fa;
       }
       .agy-toast-pill.visible {
         opacity: 0.96;
@@ -335,16 +375,34 @@
     }
   }
 
-  function showToast(anchorEl, text, isError) {
-    if (!currentSettings.showToast || !document.body) return;
+  function showToast(anchorEl, text, isError, options) {
+    if (!currentSettings.showToast || typeof document === "undefined" || !document.body) return;
     ensureStyle();
     if (!toastEl) {
       toastEl = document.createElement("div");
       toastEl.className = "agy-toast-pill";
       document.body.appendChild(toastEl);
     }
-    toastEl.textContent = text;
-    toastEl.className = isError ? "agy-toast-pill error visible" : "agy-toast-pill visible";
+    const opts = options && typeof options === "object" ? options : {};
+    const hasUndo = typeof opts.undoAction === "function";
+    toastEl.textContent = "";
+    toastEl.appendChild(document.createTextNode(text));
+    if (hasUndo) {
+      const undoBtn = document.createElement("button");
+      undoBtn.type = "button";
+      undoBtn.className = "agy-toast-undo";
+      undoBtn.textContent = "Undo";
+      undoBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        opts.undoAction();
+      });
+      toastEl.appendChild(undoBtn);
+    }
+    const classes = ["agy-toast-pill", "visible"];
+    if (isError) classes.push("error");
+    if (hasUndo) classes.push("has-undo");
+    toastEl.className = classes.join(" ");
     if (anchorEl && anchorEl.getBoundingClientRect) {
       const rect = anchorEl.getBoundingClientRect();
       toastEl.style.right = `${Math.max(12, window.innerWidth - rect.right)}px`;
@@ -354,9 +412,10 @@
       toastEl.style.bottom = "56px";
     }
     clearTimeout(toastTimer);
+    const durationMs = opts.durationMs || (hasUndo ? 7000 : 2800);
     toastTimer = setTimeout(() => {
       if (toastEl) toastEl.classList.remove("visible");
-    }, 2800);
+    }, durationMs);
   }
 
   function createSparkleSvg() {
@@ -383,10 +442,26 @@
   }
 
   async function loadConfig(forceReload) {
+    const syncCfg = (cfg) => {
+      if (cfg && cfg.settings && typeof cfg.settings === "object") {
+        currentSettings = { ...DEFAULT_UI_SETTINGS, ...cfg.settings };
+      }
+      if (cfg && cfg.meta && typeof cfg.meta === "object") {
+        currentMeta = { ...currentMeta, ...cfg.meta };
+      }
+      if (typeof document !== "undefined") refreshAllTooltips();
+      return cfg;
+    };
     if (cachedConfig && !forceReload) return cachedConfig;
-    if (!forceReload && window.__AGY_ENHANCER_CONFIG__ && window.__AGY_ENHANCER_CONFIG__.port && window.__AGY_ENHANCER_CONFIG__.token) {
+    if (
+      !forceReload &&
+      typeof window !== "undefined" &&
+      window.__AGY_ENHANCER_CONFIG__ &&
+      window.__AGY_ENHANCER_CONFIG__.port &&
+      window.__AGY_ENHANCER_CONFIG__.token
+    ) {
       cachedConfig = window.__AGY_ENHANCER_CONFIG__;
-      return cachedConfig;
+      return syncCfg(cachedConfig);
     }
     const cfgUrl = window.location.protocol.startsWith("http")
       ? "/__enhancer/config.json"
@@ -396,7 +471,28 @@
     const cfg = await resp.json();
     if (!cfg || !cfg.port || !cfg.token) throw new Error("Invalid enhancer config");
     cachedConfig = cfg;
-    return cfg;
+    return syncCfg(cachedConfig);
+  }
+
+  function serializeNodeChildren(children, chips) {
+    let out = "";
+    for (const node of children) {
+      if (!node) continue;
+      if (node.type === "text") {
+        out += node.text || "";
+      } else if (node.type === "linebreak") {
+        out += "\n";
+      } else if (node.type === "tab") {
+        out += "\t";
+      } else if (Array.isArray(node.children)) {
+        out += serializeNodeChildren(node.children, chips);
+      } else {
+        const idx = chips.length;
+        chips.push(node);
+        out += CHIP_TOKEN_PREFIX + idx + CHIP_TOKEN_SUFFIX;
+      }
+    }
+    return out;
   }
 
   function serializeLexicalState(stateJson) {
@@ -406,22 +502,16 @@
       ? stateJson.root.children
       : [];
     for (const para of rootChildren) {
-      let line = "";
-      const children = Array.isArray(para.children) ? para.children : [];
-      for (const node of children) {
-        if (node.type === "text") {
-          line += node.text || "";
-        } else if (node.type === "linebreak") {
-          line += "\n";
-        } else if (node.type === "tab") {
-          line += "\t";
-        } else {
-          const idx = chips.length;
-          chips.push(node);
-          line += CHIP_TOKEN_PREFIX + idx + CHIP_TOKEN_SUFFIX;
-        }
+      if (!para) continue;
+      if (Array.isArray(para.children)) {
+        lines.push(serializeNodeChildren(para.children, chips));
+      } else if (para.type === "text") {
+        lines.push(para.text || "");
+      } else {
+        const idx = chips.length;
+        chips.push(para);
+        lines.push(CHIP_TOKEN_PREFIX + idx + CHIP_TOKEN_SUFFIX);
       }
-      lines.push(line);
     }
     return {
       text: lines.join("\n"),
@@ -621,12 +711,13 @@
   }
 
   function detectDisplayedModel(inputBox) {
+    if (!inputBox || typeof inputBox.querySelectorAll !== "function") return "";
     // Check leaf spans first so nested badges don't concatenate duplicate text.
     for (const selector of ["span", "button, [role='button']"]) {
       const candidates = inputBox.querySelectorAll(selector);
       for (const el of candidates) {
         const txt = (el.textContent || "").trim();
-        if (/^(Gemini|Claude|Orchestrator|GPT-OSS)\b/i.test(txt) && txt.length < 60) {
+        if (/^(Gemini|Claude|Orchestrator|GPT|OpenAI|DeepSeek|Qwen|Llama|Mistral|o[1-9])\b/i.test(txt) && txt.length < 60) {
           return txt;
         }
       }
@@ -703,7 +794,7 @@
     }
   }
 
-  async function callEnhanceBackend(payload) {
+  async function callEnhanceBackend(payload, signal) {
     let cfg = await loadConfig(false);
     const doFetch = async (c) => {
       const url = window.location.protocol.startsWith("http")
@@ -716,13 +807,15 @@
           "X-Enhancer-Token": c.token,
         },
         body: JSON.stringify(payload),
+        signal,
       });
     };
 
     let resp;
     try {
       resp = await doFetch(cfg);
-    } catch {
+    } catch (err) {
+      if (err && err.name === "AbortError") throw err;
       // Port may have rotated on extension reload; reload config once.
       cfg = await loadConfig(true);
       resp = await doFetch(cfg);
@@ -734,24 +827,39 @@
     return data;
   }
 
-  function syncButtonDisabled(btn, inputEl) {
-    if (btn.classList.contains("agy-enhancing")) return;
-    const editor = inputEl && inputEl.__lexicalEditor;
-    let isEmpty = false;
-    if (editor) {
-      editor.getEditorState().read(() => {
-        const json = editor.getEditorState().toJSON();
-        const { text, chips } = serializeLexicalState(json);
-        isEmpty = !text.trim() && chips.length === 0;
-      });
-    } else {
-      isEmpty = !(inputEl && inputEl.textContent && inputEl.textContent.trim());
+  function countWords(str) {
+    const trimmed = String(str || "").trim();
+    return trimmed ? trimmed.split(/\s+/).length : 0;
+  }
+
+  async function restoreSnapshot(snapshot, btn) {
+    if (!snapshot || !snapshot.inputEl) return;
+    const editor = snapshot.inputEl.__lexicalEditor;
+    let restored = false;
+    if (editor && snapshot.stateJson && typeof editor.parseEditorState === "function") {
+      try {
+        const parsed = editor.parseEditorState(JSON.stringify(snapshot.stateJson));
+        editor.setEditorState(parsed, { tag: "agy-enhance-undo" });
+        editor.focus();
+        restored = true;
+      } catch {
+        // fallback to DOM
+      }
     }
-    btn.disabled = isEmpty;
+    if (!restored) {
+      await replaceInputViaDom(snapshot.inputEl, snapshot.text, snapshot.chips || []);
+    }
+    showToast(btn, "Restored original draft", false, { durationMs: 2200 });
   }
 
   async function handleEnhanceClick(btn, inputBox, inputEl) {
-    if (!inputEl || btn.classList.contains("agy-enhancing")) return;
+    if (!inputEl) return;
+    if (btn.classList.contains("agy-enhancing")) {
+      if (activeAbortController) {
+        activeAbortController.abort();
+      }
+      return;
+    }
     const editor = inputEl.__lexicalEditor;
 
     let stateJson = null;
@@ -766,22 +874,26 @@
     }
     if (!text.trim()) return;
 
+    const ac = new AbortController();
+    activeAbortController = ac;
     btn.classList.remove("agy-error");
     btn.classList.add("agy-enhancing");
-    btn.disabled = true;
-    btn.title = "Enhancing prompt...";
+    btn.disabled = false;
+    btn.title = "Enhancing... (click or press shortcut to cancel)";
 
     try {
       const model = detectDisplayedModel(inputBox);
       const context = extractConversationContext(inputBox);
-      const res = await callEnhanceBackend({ draft: text, context, model, markers });
+      const res = await callEnhanceBackend({ draft: text, context, model, markers }, ac.signal);
       if (res.enhanced && res.enhanced.trim() && res.enhanced !== text) {
+        const snapshot = { inputEl, stateJson, text, chips };
+        lastSnapshot = snapshot;
         let applied = false;
         if (editor && stateJson && typeof editor.parseEditorState === "function") {
           const nextJson = deserializeToLexicalJson(res.enhanced, chips, stateJson);
           try {
             const parsed = editor.parseEditorState(JSON.stringify(nextJson));
-            editor.setEditorState(parsed);
+            editor.setEditorState(parsed, { tag: "agy-enhance" });
             editor.focus();
             applied = true;
           } catch (parseErr) {
@@ -807,13 +919,24 @@
             modelUsed: res.model,
           });
         }
+        const durSec = res.durationMs ? `${(res.durationMs / 1000).toFixed(1)}s` : "";
+        const wordDelta = `${countWords(text)}→${countWords(res.enhanced)}w`;
+        const summaryParts = [res.model || "active model", durSec, wordDelta].filter(Boolean);
         btn.title = `Enhanced (${res.model || "active model"})`;
-        showToast(btn, `✦ Enhanced (${res.model || "active model"})`, false);
+        showToast(btn, `✦ Enhanced · ${summaryParts.join(" · ")}`, false, {
+          durationMs: 7000,
+          undoAction: () => restoreSnapshot(snapshot, btn),
+        });
       } else {
         btn.title = "No changes suggested";
         showToast(btn, "No changes suggested", false);
       }
     } catch (err) {
+      if (err && err.name === "AbortError") {
+        btn.title = formatEnhanceTooltip();
+        showToast(btn, "Enhancement cancelled", false, { durationMs: 2000 });
+        return;
+      }
       console.error("[EnhanceHook] Enhance failed:", err);
       btn.classList.add("agy-error");
       const errMsg = err && err.message ? err.message : String(err);
@@ -824,6 +947,7 @@
         refreshAllTooltips();
       }, 4000);
     } finally {
+      if (activeAbortController === ac) activeAbortController = null;
       btn.classList.remove("agy-enhancing");
       syncButtonDisabled(btn, inputEl);
     }
@@ -1044,6 +1168,40 @@
         statusEl
       )
     );
+    pop.appendChild(
+      buildSelectRow(
+        "Preset Mode",
+        "preset",
+        [
+          { value: "general", label: "General" },
+          { value: "debug", label: "Bug Fix / Debug" },
+          { value: "refactor", label: "Refactor" },
+          { value: "architecture", label: "Architecture / Plan" },
+        ],
+        statusEl
+      )
+    );
+    const customRow = document.createElement("div");
+    customRow.style.marginBottom = "8px";
+    const customLabel = document.createElement("label");
+    customLabel.setAttribute("for", "agy-sp-customInstructions");
+    customLabel.textContent = "Custom Instructions";
+    const customInput = document.createElement("input");
+    customInput.id = "agy-sp-customInstructions";
+    customInput.type = "text";
+    customInput.maxLength = 400;
+    customInput.placeholder = "Optional extra style or focus...";
+    customInput.className = "agy-sp-text-input";
+    customInput.value = currentSettings.customInstructions || "";
+    customInput.addEventListener("change", () => {
+      const val = customInput.value.trim().slice(0, 400);
+      currentSettings.customInstructions = val;
+      customInput.value = val;
+      saveSettingsPatch({ customInstructions: val }, statusEl);
+    });
+    customRow.appendChild(customLabel);
+    customRow.appendChild(customInput);
+    pop.appendChild(customRow);
     pop.appendChild(buildCheckboxRow("Workspace Context", "includeWorkspaceContext", statusEl));
     pop.appendChild(buildCheckboxRow("Chat History Context", "includeConversationContext", statusEl));
     pop.appendChild(buildCheckboxRow("Status Toast", "showToast", statusEl));
@@ -1200,11 +1358,32 @@
     return true;
   }
 
+  if (typeof module !== "undefined" && module.exports) {
+    module.exports = {
+      parseShortcut,
+      matchesShortcutEvent,
+      formatShortcutFromEvent,
+      serializeLexicalState,
+      deserializeToLexicalJson,
+      formatChipFallbackText,
+      detectDisplayedModel,
+    };
+  }
+  if (typeof window === "undefined" || typeof document === "undefined") {
+    return;
+  }
+
   document.addEventListener(
     "keydown",
     (e) => {
       if (activePopoverEl && e.key === "Escape" && !isRecordingShortcut) {
         closeSettingsPopover();
+        return;
+      }
+      if (activeAbortController && e.key === "Escape" && !isRecordingShortcut) {
+        activeAbortController.abort();
+        e.preventDefault();
+        e.stopPropagation();
         return;
       }
       if (isRecordingShortcut || !currentSettings.shortcutEnabled) return;
@@ -1256,25 +1435,32 @@
     }
   }
 
-  let scheduled = false;
+  let scanTimer = null;
   function scan() {
-    scheduled = false;
+    scanTimer = null;
     const boxes = document.querySelectorAll('[data-testid="agent-input-box"]');
     for (const box of boxes) {
-      attachToInputBox(box);
+      if (!box.querySelector(".agy-enhance-group")) {
+        attachToInputBox(box);
+      }
     }
   }
 
   function scheduleScan() {
-    if (scheduled) return;
-    scheduled = true;
-    requestAnimationFrame(scan);
+    if (scanTimer) return;
+    scanTimer = setTimeout(() => {
+      if (typeof requestAnimationFrame === "function") {
+        requestAnimationFrame(scan);
+      } else {
+        scan();
+      }
+    }, 180);
   }
 
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", scheduleScan, { once: true });
+    document.addEventListener("DOMContentLoaded", scan, { once: true });
   } else {
-    scheduleScan();
+    scan();
   }
 
   const observer = new MutationObserver(scheduleScan);

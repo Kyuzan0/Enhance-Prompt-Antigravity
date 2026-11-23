@@ -15,8 +15,9 @@ Setiap perubahan fungsional pada `extension.js`, `enhance-ide-hook.js`, `install
    - *(Jika `git commit` dijalankan langsung tanpa `release.mjs`, `.githooks/commit-msg` akan otomatis menaikkan versi, mengisi `CHANGELOG.md`, dan membangun `.vsix` berdasarkan pesan Conventional Commit. Gunakan `SKIP_AUTO_RELEASE=1` hanya bila memang ingin melewati bump.)*
 2. **Verifikasi Penuh Sebelum Selesai:**
    - Jalankan `npm run verify` (atau via Electron Node Linux: `ELECTRON_RUN_AS_NODE=1 /opt/antigravity-ide/antigravity-ide --test ide-extension.test.mjs` dan `verify-contracts.mjs`).
-3. **Rebuild `.vsix` Bersih:**
-   - Pastikan paket `ag-ide-prompt-enhancer-<version>.vsix` terbaru selesai dibangun (`scripts/package-vsix.mjs`) dan versi lama sudah dibersihkan.
+3. **Rebuild `.vsix` Bersih ke Folder `build/`:**
+   - Seluruh artefak hasil build `.vsix` **wajib** ditempatkan di dalam folder `build/` (`build/ag-ide-prompt-enhancer-<version>.vsix` via `scripts/package-vsix.mjs`), bukan di root proyek.
+   - Pastikan versi lama (di `build/` maupun sisa di root) sudah dibersihkan.
 
 ## 3. Aturan Git Hook (`.githooks/commit-msg`)
 - Aktifkan di clone baru dengan `npm run hooks:install` (`git config core.hooksPath .githooks`).
@@ -32,4 +33,4 @@ Setiap perubahan fungsional pada `extension.js`, `enhance-ide-hook.js`, `install
 - Pertahankan validasi origin ketat (`isAllowedEnhancerOrigin`, `isAllowedEnhancerRequest`, `Cross-Origin-Resource-Policy: same-origin`) dan token check di `extension.js`; jangan pernah membuka `Access-Control-Allow-Origin: *`.
 - `enhance-ide-hook.js` harus tetap *Trusted-Types safe* (DOM API murni, tanpa `innerHTML` atau `eval`).
 - Pertahankan efisiensi token pada `buildEnhancePrompt` (anti-repetisi riwayat chat, batas konteks `3500` / `3200`, tanpa glosarium bilingual berlebihan).
-- Jangan memasukkan file test/dev (`*.test.*`, `scripts/`, `contracts/`, `.githooks/`, `AGENTS.md`) ke dalam `.vsix` (jaga `.vscodeignore`).
+- Jangan memasukkan folder `build/` atau file test/dev (`*.test.*`, `scripts/`, `contracts/`, `.githooks/`, `AGENTS.md`) ke dalam `.vsix` (jaga `.vscodeignore`).

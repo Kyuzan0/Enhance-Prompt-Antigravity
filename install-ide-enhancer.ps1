@@ -124,10 +124,57 @@ function Sync-ProductJsonChecksums {
 }
 
 $srcDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$pkgPath = Join-Path $srcDir "package.json"
-$pkg = Get-Content -LiteralPath $pkgPath -Raw -Encoding UTF8 | ConvertFrom-Json
-if (-not $pkg.publisher -or -not $pkg.name -or -not $pkg.version) {
-    throw "package.json at $pkgPath must define publisher, name, and version."
+$resolvedVsix = ""
+$pkg = $null
+
+if ($VsixPath -and -not $Uninstall) {
+    if ($VsixPath -eq "auto") {
+        $buildDir = Join-Path $srcDir "build"
+        $localPkgPath = Join-Path $srcDir "package.json"
+        if (Test-Path -LiteralPath $localPkgPath -PathType Leaf) {
+            $localPkg = Get-Content -LiteralPath $localPkgPath -Raw -Encoding UTF8 | ConvertFrom-Json
+            foreach ($searchDir in @($buildDir, $srcDir)) {
+                $candidateVsix = Join-Path $searchDir "$($localPkg.name)-$($localPkg.version).vsix"
+                if (Test-Path -LiteralPath $candidateVsix -PathType Leaf) {
+                    $resolvedVsix = $candidateVsix
+                    break
+                }
+            }
+        }
+        if (-not $resolvedVsix) {
+            foreach ($searchDir in @($buildDir, $srcDir)) {
+                if (-not (Test-Path -LiteralPath $searchDir -PathType Container)) { continue }
+                $latestVsix = Get-ChildItem -LiteralPath $searchDir -Filter "*.vsix" -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+                if ($latestVsix) { $resolvedVsix = $latestVsix.FullName; break }
+            }
+        }
+    } else {
+        $resolvedVsix = $VsixPath
+    }
+    if (-not $resolvedVsix -or -not (Test-Path -LiteralPath $resolvedVsix -PathType Leaf)) {
+        throw "VSIX package not found: $VsixPath"
+    }
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $probeZip = [System.IO.Compression.ZipFile]::OpenRead($resolvedVsix)
+    try {
+        $pkgEntry = $probeZip.GetEntry("extension/package.json")
+        if (-not $pkgEntry) { throw "extension/package.json not found inside $resolvedVsix" }
+        $sr = New-Object System.IO.StreamReader($pkgEntry.Open(), [System.Text.UTF8Encoding]::new($false))
+        try {
+            $pkg = $sr.ReadToEnd() | ConvertFrom-Json
+        } finally {
+            $sr.Dispose()
+        }
+    } finally {
+        $probeZip.Dispose()
+    }
+} else {
+    $pkgPath = Join-Path $srcDir "package.json"
+    $pkg = Get-Content -LiteralPath $pkgPath -Raw -Encoding UTF8 | ConvertFrom-Json
+}
+
+if (-not $pkg -or -not $pkg.publisher -or -not $pkg.name -or -not $pkg.version) {
+    throw "package.json must define publisher, name, and version."
 }
 $extPublisher = [string]$pkg.publisher
 $extName = [string]$pkg.name
@@ -209,24 +256,6 @@ if (-not (Test-Path -LiteralPath $ExtensionRoot)) {
 if (-not (Test-Path -LiteralPath $dstDir)) {
     if ($PSCmdlet.ShouldProcess($dstDir, "Create extension directory")) {
         New-Item -ItemType Directory -Path $dstDir -Force | Out-Null
-    }
-}
-
-$resolvedVsix = ""
-if ($VsixPath) {
-    if ($VsixPath -eq "auto") {
-        $candidateVsix = Join-Path $srcDir "$extName-$extVersion.vsix"
-        if (Test-Path -LiteralPath $candidateVsix -PathType Leaf) {
-            $resolvedVsix = $candidateVsix
-        } else {
-            $latestVsix = Get-ChildItem -LiteralPath $srcDir -Filter "$extName-*.vsix" -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-            if ($latestVsix) { $resolvedVsix = $latestVsix.FullName }
-        }
-    } else {
-        $resolvedVsix = $VsixPath
-    }
-    if (-not $resolvedVsix -or -not (Test-Path -LiteralPath $resolvedVsix -PathType Leaf)) {
-        throw "VSIX package not found: $VsixPath"
     }
 }
 
@@ -317,9 +346,13 @@ if ($PSCmdlet.ShouldProcess($extJsonPath, "Register $extId in extensions.json"))
 
 # Pre-install the hook script & script tag into Antigravity IDE workbench HTMLs.
 if ($wbDir -and (Test-Path -LiteralPath $wbDir)) {
+    $srcHookPath = Join-Path $dstDir "enhance-ide-hook.js"
+    if (-not (Test-Path -LiteralPath $srcHookPath -PathType Leaf)) {
+        $srcHookPath = Join-Path $srcDir "enhance-ide-hook.js"
+    }
     $dstHook = Join-Path $wbDir "enhance-ide-hook.js"
     if ($PSCmdlet.ShouldProcess($dstHook, "Install enhance-ide-hook.js into workbench")) {
-        Copy-Item -LiteralPath (Join-Path $srcDir "enhance-ide-hook.js") -Destination $dstHook -Force
+        Copy-Item -LiteralPath $srcHookPath -Destination $dstHook -Force
     }
     $tag = '<script src="./enhance-ide-hook.js" type="module"></script>'
     foreach ($item in @(
@@ -373,7 +406,7 @@ if ($agyExtJs -and (Test-Path -LiteralPath $agyExtJs)) {
             $bak = "$agyExtJs.enhancer.bak"
             if ($PSCmdlet.ShouldProcess($agyExtJs, "Patch renderIframe with enhancer proxy redirect")) {
                 Copy-Item -LiteralPath $agyExtJs -Destination $bak -Force
-                $hookExpr = $marker + $urlVar + '=((u)=>{try{const p=require("path").join(__dirname,"..","..","..","out","vs","code","electron-browser","workbench","enhance-ide-hook-config.json");const cfg=JSON.parse(require("fs").readFileSync(p,"utf8"));if(cfg&&cfg.port&&/^http:\/\/127\.0\.0\.1:(\d+)/.test(u)){const x=new URL(u);x.searchParams.set("__agy_hub",x.port);x.port=String(cfg.port);return x.toString()}}catch{}return u})(' + $urlVar + ');'
+                $hookExpr = $marker + $urlVar + '=((u)=>{try{const p=require("path").join(__dirname,"..","..","..","out","vs","code","electron-browser","workbench","enhance-ide-hook-config.json");const cfg=JSON.parse(require("fs").readFileSync(p,"utf8"));if(cfg&&cfg.port&&/^http:\/\/127\.0\.0\.1:(\d+)/.test(u)){const x=new URL(u);const hp=x.port;x.searchParams.set("__agy_hub",hp);if(cfg.token){x.searchParams.set("__agy_sig",require("crypto").createHmac("sha256",String(cfg.token)).update(String(hp)).digest("hex").slice(0,16));}x.port=String(cfg.port);return x.toString()}}catch{}return u})(' + $urlVar + ');'
                 $extContent = $extContent.Replace($matchedTarget, $matchedTarget + $hookExpr)
                 Write-Utf8NoBom -Path $agyExtJs -Content $extContent
                 Write-Host "Patched extensions\agy\vscode\extension.js" -ForegroundColor Green

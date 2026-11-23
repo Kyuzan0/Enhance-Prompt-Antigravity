@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-11-23
+
+### Added
+- 1-click **Undo** button with duration/word-delta metrics in the enhancement status toast, plus `editor.setEditorState` undo tagging.
+- Toggle-cancel support for in-flight enhancements (click `✦`, press shortcut, or press `Esc`) wired to `AbortController` and child-process termination.
+- Enhancement mode presets (`general`, `debug`, `refactor`, `architecture`) and `customInstructions` setting in both VS Code configuration and the Quick Settings (`⚙`) popover.
+- Command `Prompt Enhancer: Show Diagnostics & Health Check` (`antigravityEnhancer.diagnostics`) backed by a dedicated `OutputChannel` and client log ring buffer.
+- Cross-platform Linux/macOS installer (`install-ide-enhancer.sh`) and GitHub Actions CI workflow (`.github/workflows/ci.yml`).
+- Live HTTP/SSE/WebSocket integration tests, `enhance-ide-hook.js` unit tests, `.vsix` packaging tests, and expanded contract/metadata/Trusted-Types checks in `verify-contracts.mjs`.
+
+### Changed
+- Wrapped `buildEnhancePrompt` inputs in explicit `<workspace_context>`, `<untrusted_conversation_context>`, and `<untrusted_draft>` boundaries with closing-tag disarming.
+- Sanitized Antigravity session environment variables when spawning `agy -p` and restricted fallback retries strictly to model-not-found errors.
+- Updated `serializeLexicalState` to traverse nested Lexical container nodes and broadened `detectDisplayedModel` matching; throttled `MutationObserver` scans during AI streaming.
+- Enhanced `scripts/package-vsix.mjs` (`.vscodeignore` negation/root-anchor support, `.vscodeignore` self-exclusion) and `scripts/auto-bump-on-commit.mjs` (runtime-file gating and pre-bump verification).
+
+### Fixed
+- Closed CSWSH and loopback port-pivot SSRF gaps on WebSocket `upgrade` and HTTP fallthrough proxy routes, using HMAC-signed `__agy_hub` targets (`__agy_sig`) and timing-safe token verification (`crypto.timingSafeEqual`).
+- Blocked cross-port localhost XSSI via `Sec-Fetch-Site: same-site` without valid `Origin`/`Referer`, and added `413 Payload Too Large` + SSE keepalive/error cleanup.
+- Fixed Linux case-sensitivity when resolving `CHANGELOG.md` / `changelog.md` from extracted `.vsix` packages.
+- Fixed multi-window `enhance-ide-hook-config.json` overwrite race, `loadConfig()` metadata/settings synchronization, and standalone `-VsixPath` installation in `install-ide-enhancer.ps1`.
+
 ## [1.3.0] - 2026-11-22
 
 ### Added
@@ -42,7 +64,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial release of Antigravity IDE Prompt Enhancer with in-chat **✦ Enhance Prompt** button, loopback reverse proxy, multi-window `__agy_hub` routing, Lexical `@mention`/chip preservation, and strict tool-deny `agy -p` execution.
 
-[Unreleased]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.0.0...v1.1.0

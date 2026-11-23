@@ -1,10 +1,13 @@
 *.test.*
 *.spec.*
 *.vsix
+build/
 *.log
 *.bak
 *.enhancer.bak
+.vscodeignore
 install-ide-enhancer.ps1
+install-ide-enhancer.sh
 docs/
 contracts/
 scripts/
@@ -13,4 +16,5 @@ verify-contracts.mjs
 .gitattributes
 .git/
 .githooks/
+.github/
 AGENTS.md

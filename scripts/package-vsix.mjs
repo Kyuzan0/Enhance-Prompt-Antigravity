@@ -30,8 +30,12 @@ function parseVscodeIgnore(ignorePath) {
   for (const raw of lines) {
     const line = raw.trim();
     if (!line || line.startsWith('#')) continue;
-    const isDir = line.endsWith('/');
-    const clean = line.replace(/\/+$/, '').replace(/^\.\//, '');
+    const negated = line.startsWith('!');
+    const body = negated ? line.slice(1).trim() : line;
+    if (!body) continue;
+    const rootAnchored = body.startsWith('/');
+    const isDir = body.endsWith('/');
+    const clean = body.replace(/^\/+/, '').replace(/\/+$/, '').replace(/^\.\//, '');
     if (!clean) continue;
     const regexStr = clean
       .replace(/[.+^${}()|[\]\\]/g, '\\$&')
@@ -40,6 +44,8 @@ function parseVscodeIgnore(ignorePath) {
       .replace(/\?/g, '[^/]');
     rules.push({
       raw: clean,
+      negated,
+      rootAnchored,
       isDir,
       hasSlash: clean.includes('/'),
       re: new RegExp(`^${regexStr}$`, 'i'),
@@ -50,18 +56,23 @@ function parseVscodeIgnore(ignorePath) {
 
 function isIgnored(relPosix, isDirectory, rules) {
   const baseName = path.posix.basename(relPosix);
-  if (baseName === '.git' || baseName === 'node_modules') return true;
+  if (baseName === '.git' || baseName === 'node_modules' || baseName === '.vscodeignore') return true;
+  let ignored = false;
   for (const rule of rules) {
     if (rule.isDir && !isDirectory && !relPosix.startsWith(rule.raw + '/')) {
       continue;
     }
-    if (rule.hasSlash) {
-      if (rule.re.test(relPosix) || relPosix.startsWith(rule.raw + '/')) return true;
+    let matched = false;
+    if (rule.rootAnchored || rule.hasSlash) {
+      matched = rule.re.test(relPosix) || relPosix.startsWith(rule.raw + '/');
     } else {
-      if (rule.re.test(baseName) || rule.re.test(relPosix)) return true;
+      matched = rule.re.test(baseName) || rule.re.test(relPosix);
+    }
+    if (matched) {
+      ignored = !rule.negated;
     }
   }
-  return false;
+  return ignored;
 }
 
 function collectFiles(dir, relPrefix, rules, out) {
@@ -205,6 +216,11 @@ function buildVsixManifest(pkg, hasReadme, hasChangelog, hasLicense) {
   if (hasLicense) {
     assets.push(`<Asset Type="Microsoft.VisualStudio.Services.Content.License" Path="extension/LICENSE.txt" Addressable="true" />`);
   }
+  const iconRel = typeof pkg.icon === 'string' ? pkg.icon.replace(/^\.\//, '') : '';
+  const hasIcon = Boolean(iconRel && fs.existsSync(path.join(rootDir, iconRel)));
+  if (hasIcon) {
+    assets.push(`<Asset Type="Microsoft.VisualStudio.Services.Icons.Default" Path="extension/${escapeXml(iconRel)}" Addressable="true" />`);
+  }
 
   return `<?xml version="1.0" encoding="utf-8"?>
 \t<PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011" xmlns:d="http://schemas.microsoft.com/developer/vsx-schema-design/2011">
@@ -227,11 +243,13 @@ function buildVsixManifest(pkg, hasReadme, hasChangelog, hasLicense) {
 \t\t\t\t<Property Id="Microsoft.VisualStudio.Services.Links.Getstarted" Value="${escapeXml(repoUrl)}" />
 \t\t\t\t<Property Id="Microsoft.VisualStudio.Services.Links.GitHub" Value="${escapeXml(repoUrl)}" />
 \t\t\t\t<Property Id="Microsoft.VisualStudio.Services.Links.Support" Value="${escapeXml(pkg.bugs?.url || '')}" />
+\t\t\t\t<Property Id="Microsoft.VisualStudio.Services.Links.Issues" Value="${escapeXml(pkg.bugs?.url || '')}" />
 \t\t\t\t<Property Id="Microsoft.VisualStudio.Services.Links.Learn" Value="${escapeXml(pkg.homepage || '')}" />
 \t\t\t\t<Property Id="Microsoft.VisualStudio.Services.GitHubFlavoredMarkdown" Value="true" />
 \t\t\t\t<Property Id="Microsoft.VisualStudio.Services.Content.Pricing" Value="Free" />
 \t\t\t</Properties>
 \t\t\t${hasLicense ? '<License>extension/LICENSE.txt</License>' : ''}
+\t\t\t${hasIcon ? `<Icon>extension/${escapeXml(iconRel)}</Icon>` : ''}
 \t\t</Metadata>
 \t\t<Installation>
 \t\t\t<InstallationTarget Id="Microsoft.VisualStudio.Code"/>
@@ -254,14 +272,22 @@ function main() {
     throw new Error(`Invalid package.json metadata: name=${pkg.name}, publisher=${pkg.publisher}, version=${pkg.version}`);
   }
 
+  const buildDir = path.join(rootDir, 'build');
+  fs.mkdirSync(buildDir, { recursive: true });
   const outName = `${pkg.name}-${pkg.version}.vsix`;
-  const outPath = path.join(rootDir, outName);
+  const outPath = path.join(buildDir, outName);
 
   if (!keepOld) {
-    for (const file of fs.readdirSync(rootDir)) {
+    for (const file of fs.readdirSync(buildDir)) {
       if (file.startsWith(`${pkg.name}-`) && file.endsWith('.vsix') && file !== outName) {
+        fs.rmSync(path.join(buildDir, file), { force: true });
+        console.log(`[package-vsix] Removed stale artifact: build/${file}`);
+      }
+    }
+    for (const file of fs.readdirSync(rootDir)) {
+      if (file.startsWith(`${pkg.name}-`) && file.endsWith('.vsix')) {
         fs.rmSync(path.join(rootDir, file), { force: true });
-        console.log(`[package-vsix] Removed stale artifact: ${file}`);
+        console.log(`[package-vsix] Removed legacy root artifact: ${file}`);
       }
     }
   }
@@ -304,7 +330,7 @@ function main() {
   fs.writeFileSync(outPath, zipBuf);
 
   const sha256 = crypto.createHash('sha256').update(zipBuf).digest('hex');
-  console.log(`[package-vsix] Built ${outName} (${zipBuf.length} bytes, ${zipEntries.length} entries)`);
+  console.log(`[package-vsix] Built build/${outName} (${zipBuf.length} bytes, ${zipEntries.length} entries)`);
   console.log(`[package-vsix] SHA-256: ${sha256}`);
   for (const e of zipEntries) {
     console.log(`  - ${e.name}`);
