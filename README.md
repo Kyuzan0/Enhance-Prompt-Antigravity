@@ -9,8 +9,9 @@ Ekstensi VS Code-compatible (`kyuzan0.ag-ide-prompt-enhancer`, versi aktif mengi
 ## Fitur Utama
 
 - **Tombol `✦` & Shortcut `Ctrl+Alt+E` / `Cmd+Alt+E`:** Menulis ulang draf prompt aktif secara *in-place* menggunakan model yang sedang dipilih, konteks workspace aktif, dan konteks percakapan terbaru secara hemat token.
-- **Quick Settings (`⚙`) & Sinkronisasi IDE Settings:** Mengatur shortcut, bahasa output (`auto`, `id`, `en`), tingkat detail (`concise`, `balanced`, `comprehensive`), toggle konteks, status toast, serta menampilkan badge versi & credit author.
-- **Command Palette Info & What's New:** Perintah **`Prompt Enhancer: About & Version Info`** (`antigravityEnhancer.about`) dan notifikasi pembaruan satu kali saat ekstensi naik versi.
+- **1-Click Undo & Toggle-Cancel:** Tombol **Undo** beserta ringkasan durasi/jumlah kata di status toast untuk mengembalikan draf asli, serta klik ulang `✦` / shortcut / `Esc` untuk membatalkan proses *in-flight*.
+- **Quick Settings (`⚙`) & Sinkronisasi IDE Settings:** Mengatur shortcut, bahasa output (`auto`, `id`, `en`), tingkat detail (`concise`, `balanced`, `comprehensive`), preset mode (`general`, `debug`, `refactor`, `architecture`), `customInstructions`, toggle konteks, status toast, serta badge versi & credit author.
+- **Command Palette & Diagnostik:** Perintah **`Prompt Enhancer: About & Version Info`** (`antigravityEnhancer.about`), **`Prompt Enhancer: Show Diagnostics & Health Check`** (`antigravityEnhancer.diagnostics`), serta notifikasi pembaruan satu kali (*What's New*).
 - **Preservasi Token & Lampiran:** Menjaga `@file`, `@symbol`, dan attachment chips tanpa mengekspansinya.
 - **Loopback Reverse Proxy & Self-Healing:** Menjalankan HTTP + WebSocket reverse proxy lokal (`127.0.0.1:47831`, terisolasi per window via `__agy_hub`) untuk menyuntikkan [enhance-ide-hook.js](enhance-ide-hook.js) secara *Trusted-Types safe*, sekaligus otomatis memulihkan patch `workbench*.html`, `extensions/agy/vscode/extension.js`, dan checksum `product.json` setelah pembaruan IDE.
 - **Strict Containment:** Memanggil biner native `agy -p` dengan `toolPermission: "strict"` dan `permissions.deny` untuk seluruh kelas tool.
@@ -30,8 +31,15 @@ Ekstensi VS Code-compatible (`kyuzan0.ag-ide-prompt-enhancer`, versi aktif mengi
 # Opsional: dry-run terlebih dahulu
 powershell -ExecutionPolicy Bypass -File install-ide-enhancer.ps1 -WhatIf
 
-# Instal dari source (atau tambahkan -VsixPath auto untuk mengekstrak .vsix terbaru)
+# Instal dari source (atau tambahkan -VsixPath auto untuk mengekstrak .vsix terbaru dari build/)
 powershell -ExecutionPolicy Bypass -File install-ide-enhancer.ps1
+```
+
+### Linux / macOS (Bash)
+
+```bash
+# Instal dari source (atau tambahkan --vsix auto untuk mengekstrak .vsix terbaru dari build/)
+./install-ide-enhancer.sh
 ```
 
 Setelah instalasi, lakukan **restart penuh Antigravity IDE** (atau **`Developer: Reload Window`**) agar patch `workbench*.html` dan checksum `product.json` aktif.
@@ -44,7 +52,7 @@ Ekstensi ini menggunakan [`package.json`](package.json) sebagai *single source o
 # 1. Jalankan syntax check, unit test, dan verifikasi kontrak
 npm run verify
 
-# 2. Build paket .vsix bersih (otomatis menghapus .vsix versi lama)
+# 2. Build paket .vsix bersih ke folder build/ (otomatis menghapus .vsix versi lama)
 npm run package
 
 # 3. Atau jalankan alur rilis lengkap (bump versi + update CHANGELOG.md + verify + build .vsix):
@@ -66,6 +74,8 @@ Opsi tambahan pada [`scripts/release.mjs`](scripts/release.mjs):
 | `antigravityPromptEnhancer.shortcut` | `Ctrl+Alt+E` | Shortcut kustom (`Ctrl+Alt+E` / `Cmd+Alt+E` di macOS). |
 | `antigravityPromptEnhancer.outputLanguage` | `auto` | Bahasa output (`auto`, `id`, `en`). |
 | `antigravityPromptEnhancer.detailLevel` | `balanced` | Tingkat detail (`concise`, `balanced`, `comprehensive`). |
+| `antigravityPromptEnhancer.preset` | `general` | Mode preset enhancement (`general`, `debug`, `refactor`, `architecture`). |
+| `antigravityPromptEnhancer.customInstructions` | `""` | Instruksi tambahan singkat (maks. 400 karakter). |
 | `antigravityPromptEnhancer.includeWorkspaceContext` | `true` | Sertakan struktur workspace, manifest, dan tab editor aktif. |
 | `antigravityPromptEnhancer.includeConversationContext` | `true` | Sertakan pesan terbaru dari thread chat aktif. |
 | `antigravityPromptEnhancer.showToast` | `true` | Tampilkan toast status di panel chat. |
@@ -90,6 +100,12 @@ Lihat prosedur acceptance live di [docs/RUNBOOK_IDE_ACCEPTANCE.md](docs/RUNBOOK_
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File install-ide-enhancer.ps1 -Uninstall
+```
+
+Atau di Linux / macOS:
+
+```bash
+./install-ide-enhancer.sh --uninstall
 ```
 
 Perintah di atas memulihkan `workbench.html`, `workbench-jetski-agent.html`, dan `extensions/agy/vscode/extension.js` dari `.enhancer.bak`, menyinkronkan ulang checksum `product.json`, menghapus file hook yang disuntikkan, serta menghapus registrasi ekstensi.

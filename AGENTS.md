@@ -3,7 +3,7 @@
 Instruksi kerja wajib bagi AI coding agent saat memodifikasi proyek ini.
 
 ## 1. Batas Workspace & Identitas
-- Proyek ini berdiri independen khusus untuk **Antigravity IDE**. Jangan memodifikasi proyek sibling `../agy-cli` kecuali diminta secara eksplisit oleh pengguna.
+- Proyek ini berdiri independen khusus untuk **Antigravity IDE**. Fokuskan seluruh perubahan hanya di dalam repositori ini.
 - **`package.json`** adalah *single source of truth* untuk versi (SemVer) dan metadata ekstensi. Jangan melakukan hardcode string versi di `extension.js`, `enhance-ide-hook.js`, `install-ide-enhancer.ps1`, atau dokumentasi.
 - Pertahankan `"publisher": "kyuzan0"` dan atribusi author **`Kyuzan0`** (`https://github.com/Kyuzan0`).
 

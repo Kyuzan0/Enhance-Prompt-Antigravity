@@ -194,6 +194,7 @@ function buildContentTypesXml() {
     `<Default Extension=".js" ContentType="application/javascript"/>` +
     `<Default Extension=".json" ContentType="application/json"/>` +
     `<Default Extension=".md" ContentType="text/markdown"/>` +
+    `<Default Extension=".png" ContentType="image/png"/>` +
     `<Default Extension=".txt" ContentType="text/plain"/>` +
     `<Default Extension=".vsixmanifest" ContentType="text/xml"/>` +
     `</Types>`

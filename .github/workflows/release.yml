@@ -1,0 +1,46 @@
+name: Release & Publish VSIX
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Verify syntax, unit tests, and contracts
+        run: npm run verify
+
+      - name: Build VSIX package
+        run: npm run package
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/ag-ide-prompt-enhancer-*.vsix
+          generate_release_notes: true
+
+      - name: Publish to Open VSX Registry
+        if: ${{ secrets.OVSX_PAT != '' }}
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: npx --yes ovsx publish build/ag-ide-prompt-enhancer-*.vsix -p "$OVSX_PAT"
+
+      - name: Publish to Visual Studio Marketplace
+        if: ${{ secrets.VSCE_PAT != '' }}
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: npx --yes @vscode/vsce publish --packagePath build/ag-ide-prompt-enhancer-*.vsix -p "$VSCE_PAT"

@@ -6,10 +6,9 @@
 build/
 enhance-ide-hook-config.json
 
-# Tests & local runbooks
-*.test.*
-*.spec.*
-docs/RUNBOOK_*.md
+# Local secrets & env
+.env
+.env.*
 
 # Dependencies & OS/editor noise
 node_modules/

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-11-23
+
+### Added
+- 128×128 extension icon (`assets/icon.png`), `galleryBanner` metadata in `package.json`, and `.png` content-type mapping in `scripts/package-vsix.mjs`.
+- Automated GitHub Actions release workflow (`.github/workflows/release.yml`) for GitHub Releases, Open VSX (`OVSX_PAT`), and Visual Studio Marketplace (`VSCE_PAT`).
+
 ## [1.4.0] - 2026-11-23
 
 ### Added
@@ -64,7 +70,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial release of Antigravity IDE Prompt Enhancer with in-chat **✦ Enhance Prompt** button, loopback reverse proxy, multi-window `__agy_hub` routing, Lexical `@mention`/chip preservation, and strict tool-deny `agy -p` execution.
 
-[Unreleased]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.4.1...HEAD
+[1.4.1]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.1.0...v1.2.0
