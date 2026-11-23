@@ -407,10 +407,11 @@
         font-family: var(--vscode-font-family, system-ui, sans-serif);
         font-size: 11px;
         pointer-events: none;
+        visibility: hidden;
         opacity: 0;
-        transition: opacity 0.18s ease;
+        transition: opacity 0.18s ease, visibility 0.18s ease;
       }
-      .agy-toast-pill.has-undo {
+      .agy-toast-pill.visible.has-undo {
         pointer-events: auto;
       }
       .agy-toast-undo {
@@ -442,6 +443,7 @@
         border-color: #60a5fa;
       }
       .agy-toast-pill.visible {
+        visibility: visible;
         opacity: 0.96;
       }
       .agy-toast-pill.error {
@@ -565,7 +567,10 @@
     toastStartedAt = Date.now();
     if (toastPaused) return;
     toastTimer = setTimeout(() => {
-      if (toastEl) toastEl.classList.remove("visible");
+      if (toastEl) {
+        toastEl.classList.remove("visible", "has-undo");
+        toastEl.textContent = "";
+      }
     }, ms);
   }
 
@@ -732,7 +737,7 @@
       ? stateJson.root.children
       : [];
     for (const p of rootChildren) {
-      if (!paraTpl && p && Array.isArray(p.children)) {
+      if (!paraTpl && p && p.type === "paragraph" && Array.isArray(p.children)) {
         paraTpl = { ...p, children: [] };
       }
       if (!textTpl && p && Array.isArray(p.children)) {
@@ -852,6 +857,7 @@
   }
 
   async function replaceInputViaDom(inputEl, enhancedText, chips) {
+    if (!inputEl || !inputEl.isConnected) return false;
     let plain = String(enhancedText || "");
     plain = plain.replace(/\[\[AGY_CHIP_(\d+)\]\]/g, (_, idxStr) => {
       const idx = Number(idxStr);
@@ -1037,15 +1043,36 @@
     return trimmed ? trimmed.split(/\s+/).length : 0;
   }
 
+  function focusEditorSafely(editor, inputEl) {
+    const doFocus = () => {
+      if (!inputEl || !inputEl.isConnected) return;
+      try {
+        if (editor && typeof editor.focus === "function") editor.focus();
+        else inputEl.focus();
+      } catch {
+        try {
+          inputEl.focus();
+        } catch {
+          // ignore
+        }
+      }
+    };
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(doFocus);
+    } else {
+      doFocus();
+    }
+  }
+
   async function restoreSnapshot(snapshot, btn) {
-    if (!snapshot || !snapshot.inputEl) return;
+    if (!snapshot || !snapshot.inputEl || !snapshot.inputEl.isConnected) return;
     const editor = snapshot.inputEl.__lexicalEditor;
     let restored = false;
     if (editor && snapshot.stateJson && typeof editor.parseEditorState === "function") {
       try {
         const parsed = editor.parseEditorState(JSON.stringify(snapshot.stateJson));
         editor.setEditorState(parsed, { tag: "agy-enhance-undo" });
-        editor.focus();
+        focusEditorSafely(editor, snapshot.inputEl);
         restored = true;
       } catch {
         // fallback to DOM
@@ -1057,8 +1084,30 @@
     showToast(btn, "Restored original draft", false, { durationMs: 2200 });
   }
 
+  function syncButtonDisabled(btn, inputEl) {
+    if (!btn || !inputEl) return;
+    if (btn.isConnected === false || inputEl.isConnected === false) return;
+    if (btn.classList && btn.classList.contains("agy-enhancing")) return;
+    const editor = inputEl.__lexicalEditor;
+    let isEmpty = false;
+    if (editor && typeof editor.getEditorState === "function") {
+      try {
+        editor.getEditorState().read(() => {
+          const json = editor.getEditorState().toJSON();
+          const { text, chips } = serializeLexicalState(json);
+          isEmpty = !text.trim() && chips.length === 0;
+        });
+      } catch {
+        isEmpty = !(inputEl.textContent && inputEl.textContent.trim());
+      }
+    } else {
+      isEmpty = !(inputEl.textContent && inputEl.textContent.trim());
+    }
+    btn.disabled = isEmpty;
+  }
+
   async function handleEnhanceClick(btn, inputBox, inputEl) {
-    if (!inputEl) return;
+    if (!inputEl || !inputEl.isConnected) return;
     if (btn.classList.contains("agy-enhancing")) {
       if (activeAbortController) {
         activeAbortController.abort();
@@ -1091,6 +1140,7 @@
       const model = detectDisplayedModel(inputBox);
       const context = extractConversationContext(inputBox);
       const res = await callEnhanceBackend({ draft: text, context, model, markers }, ac.signal);
+      if (!inputEl.isConnected) return;
       if (res.enhanced && res.enhanced.trim() && res.enhanced !== text) {
         const snapshot = { inputEl, stateJson, text, chips };
         lastSnapshot = snapshot;
@@ -1100,7 +1150,7 @@
           try {
             const parsed = editor.parseEditorState(JSON.stringify(nextJson));
             editor.setEditorState(parsed, { tag: "agy-enhance" });
-            editor.focus();
+            focusEditorSafely(editor, inputEl);
             applied = true;
           } catch (parseErr) {
             console.warn("[EnhanceHook] parseEditorState failed, using DOM fallback:", parseErr);
@@ -1685,63 +1735,67 @@
   }
 
   function attachToInputBox(inputBox) {
-    if (inputBox.querySelector('[data-testid="enhance-prompt-button"]')) return;
-    const inputEl = inputBox.querySelector('[aria-label="Message input"][contenteditable="true"]');
-    if (!inputEl) return;
+    try {
+      if (!inputBox || inputBox.querySelector('[data-testid="enhance-prompt-button"]')) return;
+      const inputEl = inputBox.querySelector('[aria-label="Message input"][contenteditable="true"]');
+      if (!inputEl) return;
 
-    const target = findRightActionGroup(inputBox);
-    if (!target || !target.rightGroup) return;
+      const target = findRightActionGroup(inputBox);
+      if (!target || !target.rightGroup) return;
 
-    ensureStyle();
+      ensureStyle();
 
-    const group = document.createElement("div");
-    group.className = "agy-enhance-group";
+      const group = document.createElement("div");
+      group.className = "agy-enhance-group";
 
-    const settingsBtn = document.createElement("button");
-    settingsBtn.type = "button";
-    settingsBtn.className = "agy-settings-btn";
-    settingsBtn.setAttribute("data-testid", "enhance-settings-button");
-    settingsBtn.setAttribute("aria-label", "Prompt Enhancer Settings");
-    settingsBtn.title = "Prompt Enhancer Settings";
-    settingsBtn.appendChild(createGearSvg());
-    settingsBtn.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      toggleSettingsPopover(settingsBtn);
-    });
+      const settingsBtn = document.createElement("button");
+      settingsBtn.type = "button";
+      settingsBtn.className = "agy-settings-btn";
+      settingsBtn.setAttribute("data-testid", "enhance-settings-button");
+      settingsBtn.setAttribute("aria-label", "Prompt Enhancer Settings");
+      settingsBtn.title = "Prompt Enhancer Settings";
+      settingsBtn.appendChild(createGearSvg());
+      settingsBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleSettingsPopover(settingsBtn);
+      });
 
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "agy-enhance-btn";
-    btn.setAttribute("data-testid", "enhance-prompt-button");
-    btn.setAttribute("aria-label", "Enhance Prompt");
-    btn.title = formatEnhanceTooltip();
-    btn.appendChild(createSparkleSvg());
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "agy-enhance-btn";
+      btn.setAttribute("data-testid", "enhance-prompt-button");
+      btn.setAttribute("aria-label", "Enhance Prompt");
+      btn.title = formatEnhanceTooltip();
+      btn.appendChild(createSparkleSvg());
 
-    btn.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      handleEnhanceClick(btn, inputBox, inputEl);
-    });
-    btn.addEventListener("contextmenu", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      toggleSettingsPopover(btn);
-    });
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        handleEnhanceClick(btn, inputBox, inputEl);
+      });
+      btn.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleSettingsPopover(btn);
+      });
 
-    group.appendChild(settingsBtn);
-    group.appendChild(btn);
-    target.rightGroup.insertBefore(group, target.anchor || null);
-    syncButtonDisabled(btn, inputEl);
+      group.appendChild(settingsBtn);
+      group.appendChild(btn);
+      target.rightGroup.insertBefore(group, target.anchor || null);
+      syncButtonDisabled(btn, inputEl);
 
-    if (inputEl.dataset.agyEnhanceBound !== "1") {
-      inputEl.dataset.agyEnhanceBound = "1";
-      const editor = inputEl.__lexicalEditor;
-      if (editor && typeof editor.registerUpdateListener === "function") {
-        editor.registerUpdateListener(() => syncButtonDisabled(btn, inputEl));
-      } else {
-        inputEl.addEventListener("input", () => syncButtonDisabled(btn, inputEl));
+      if (inputEl.dataset.agyEnhanceBound !== "1") {
+        inputEl.dataset.agyEnhanceBound = "1";
+        const editor = inputEl.__lexicalEditor;
+        if (editor && typeof editor.registerUpdateListener === "function") {
+          editor.registerUpdateListener(() => syncButtonDisabled(btn, inputEl));
+        } else {
+          inputEl.addEventListener("input", () => syncButtonDisabled(btn, inputEl));
+        }
       }
+    } catch (err) {
+      console.warn("[EnhanceHook] attachToInputBox error:", err);
     }
   }
 
@@ -1767,6 +1821,8 @@
       formatShortcutFromEvent,
       serializeLexicalState,
       deserializeToLexicalJson,
+      findTemplateNodes,
+      syncButtonDisabled,
       formatChipFallbackText,
       detectDisplayedModel,
     };
@@ -1809,6 +1865,10 @@
       return;
     }
     closeSettingsPopover();
+  });
+
+  window.addEventListener("blur", () => {
+    isRecordingShortcut = false;
   });
 
   window.addEventListener("resize", () => {

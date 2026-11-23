@@ -707,3 +707,54 @@ test("package.json keybinding respects shortcutEnabled config setting", () => {
   assert.ok(kb, "enhancePrompt keybinding should exist");
   assert.equal(kb.when, "config.antigravityPromptEnhancer.shortcutEnabled");
 });
+
+test("enhance-ide-hook.js syncButtonDisabled, toast overlay visibility, and list-rooted paragraph templates are safe", () => {
+  const makeBtn = (enhancing = false) => ({
+    isConnected: true,
+    disabled: false,
+    classList: { contains: (cls) => enhancing && cls === "agy-enhancing" },
+  });
+
+  const btnNonEmpty = makeBtn(false);
+  hook.syncButtonDisabled(btnNonEmpty, { isConnected: true, textContent: "hello" });
+  assert.equal(btnNonEmpty.disabled, false);
+
+  const btnEmpty = makeBtn(false);
+  hook.syncButtonDisabled(btnEmpty, { isConnected: true, textContent: "   " });
+  assert.equal(btnEmpty.disabled, true);
+
+  const btnEnhancing = makeBtn(true);
+  hook.syncButtonDisabled(btnEnhancing, { isConnected: true, textContent: "" });
+  assert.equal(btnEnhancing.disabled, false);
+
+  const btnDisconnected = makeBtn(false);
+  btnDisconnected.isConnected = false;
+  hook.syncButtonDisabled(btnDisconnected, { isConnected: true, textContent: "" });
+  assert.equal(btnDisconnected.disabled, false);
+
+  const btnThrowingEditor = makeBtn(false);
+  hook.syncButtonDisabled(btnThrowingEditor, {
+    isConnected: true,
+    textContent: "fallback text",
+    __lexicalEditor: {
+      getEditorState: () => {
+        throw new Error("boom");
+      },
+    },
+  });
+  assert.equal(btnThrowingEditor.disabled, false);
+
+  const listState = {
+    root: {
+      type: "root",
+      children: [{ type: "list", children: [{ type: "listitem", children: [{ type: "text", text: "item" }] }] }],
+    },
+  };
+  const rebuilt = hook.deserializeToLexicalJson("Rewritten line", [], listState);
+  assert.equal(rebuilt.root.children[0].type, "paragraph");
+
+  const hookSrc = fs.readFileSync(path.join(__dirname, "enhance-ide-hook.js"), "utf8");
+  assert.equal(/function\s+syncButtonDisabled\s*\(/.test(hookSrc), true);
+  assert.equal(hookSrc.includes(".agy-toast-pill.visible.has-undo"), true);
+  assert.equal(hookSrc.includes("visibility: hidden;"), true);
+});

@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.8] - 2026-11-23
+
+### Fixed
+- Restored missing `syncButtonDisabled(btn, inputEl)` helper in `enhance-ide-hook.js` with `isConnected` and `try/catch` guards to prevent `ReferenceError` during input attachment and Lexical updates.
+- Scoped `.agy-toast-pill.visible.has-undo` (`pointer-events: auto`) and `visibility: hidden` + class cleanup on hide so expired Undo toasts never block clicks on the chat input.
+- Restricted `findTemplateNodes` to `type === "paragraph"` nodes, added `isConnected` / `requestAnimationFrame` focus guards in `handleEnhanceClick` and `restoreSnapshot`, guarded `replaceInputViaDom` & `attachToInputBox`, and reset shortcut recording on `window.blur`.
+
 ## [1.4.7] - 2026-11-23
 
 ### Changed
@@ -110,7 +117,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial release of Antigravity IDE Prompt Enhancer with in-chat **✦ Enhance Prompt** button, loopback reverse proxy, multi-window `__agy_hub` routing, Lexical `@mention`/chip preservation, and strict tool-deny `agy -p` execution.
 
-[Unreleased]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.4.7...HEAD
+[Unreleased]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.4.8...HEAD
+[1.4.8]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.4.7...v1.4.8
 [1.4.7]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.4.6...v1.4.7
 [1.4.6]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.4.5...v1.4.6
 [1.4.5]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.4.4...v1.4.5
