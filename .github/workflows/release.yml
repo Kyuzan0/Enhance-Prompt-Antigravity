@@ -2,46 +2,74 @@ name: Release & Publish VSIX
 
 on:
   push:
-    tags:
-      - "v*"
+    branches:
+      - main
   workflow_dispatch:
+
+concurrency:
+  group: release-publish
+  cancel-in-progress: false
 
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    outputs:
+      should_release: ${{ steps.check_version.outputs.should_release }}
+      tag: ${{ steps.check_version.outputs.tag }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Check if package.json version is already tagged
+        id: check_version
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          TAG="v${VERSION}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          if git ls-remote --tags origin "refs/tags/${TAG}" | grep -q "refs/tags/${TAG}"; then
+            echo "Tag ${TAG} already exists on origin; skipping release."
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Tag ${TAG} not found on origin; proceeding with release."
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Setup Node.js
+        if: steps.check_version.outputs.should_release == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: "20"
 
       - name: Verify syntax, unit tests, and contracts
+        if: steps.check_version.outputs.should_release == 'true'
         run: npm run verify
 
       - name: Build VSIX package
+        if: steps.check_version.outputs.should_release == 'true'
         run: npm run package
 
       - name: Upload VSIX build artifact
+        if: steps.check_version.outputs.should_release == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: vsix-package
           path: build/ag-ide-prompt-enhancer-*.vsix
           if-no-files-found: error
 
-      - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Create GitHub Release & Tag
+        if: steps.check_version.outputs.should_release == 'true'
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.check_version.outputs.tag }}
+          name: Release ${{ steps.check_version.outputs.tag }}
           files: build/ag-ide-prompt-enhancer-*.vsix
           generate_release_notes: true
 
   publish-openvsx:
     needs: build-and-release
+    if: needs.build-and-release.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -63,6 +91,7 @@ jobs:
 
   publish-vs-marketplace:
     needs: build-and-release
+    if: needs.build-and-release.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
