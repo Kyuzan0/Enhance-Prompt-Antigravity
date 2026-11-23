@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.2] - 2026-11-23
+
+### Fixed
+- Restore Agents loading from the native Antigravity webview by allowing signed iframe navigations to the hub while retaining origin checks on enhancer endpoints and WebSocket upgrades.
+- Migrate existing iframe hooks during install and repair, preserve their original backups, and keep the native hub URL until the enhancer has a signing token.
+
 ## [1.4.1] - 2026-11-23
 
 ### Added
@@ -70,7 +76,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial release of Antigravity IDE Prompt Enhancer with in-chat **✦ Enhance Prompt** button, loopback reverse proxy, multi-window `__agy_hub` routing, Lexical `@mention`/chip preservation, and strict tool-deny `agy -p` execution.
 
-[Unreleased]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.4.1...HEAD
+[Unreleased]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.4.2...HEAD
+[1.4.2]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.4.1...v1.4.2
 [1.4.1]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.2.0...v1.3.0

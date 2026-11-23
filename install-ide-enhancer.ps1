@@ -386,36 +386,52 @@ if ($wbDir -and (Test-Path -LiteralPath $wbDir)) {
     Write-Host "Antigravity IDE workbench directory not found at $wbDir (skipping workbench pre-patch)" -ForegroundColor Yellow
 }
 
-# Pre-patch Antigravity built-in agy extension iframe loader so sidebar webview routes through our local enhancer proxy.
+# Pre-patch Antigravity's native iframe loader and migrate the enhancer's earlier snippets.
 if ($agyExtJs -and (Test-Path -LiteralPath $agyExtJs)) {
     $marker = '/*AGY_ENHANCER_IFRAME_HOOK*/'
     $extContent = [System.IO.File]::ReadAllText($agyExtJs, [System.Text.UTF8Encoding]::new($false))
     if ($extContent.Length -gt 0 -and $extContent[0] -eq [char]0xFEFF) { $extContent = $extContent.Substring(1) }
-    if ($extContent -notmatch [regex]::Escape($marker)) {
-        $matchedTarget = $null
-        $urlVar = 'd'
-        $exactTarget = 'renderIframe(a,b,c){var d=this.buildIframeUrl(b,c);'
-        if ($extContent.Contains($exactTarget)) {
-            $matchedTarget = $exactTarget
-        } elseif ($extContent -match '(renderIframe\([^)]*\)\{\s*(?:var|let|const)\s+([a-zA-Z0-9_$]+)\s*=\s*this\.buildIframeUrl\([^;]+\);)') {
-            $matchedTarget = $Matches[1]
-            $urlVar = $Matches[2]
+
+    $target = [regex]::Match($extContent, 'renderIframe\([^)]*\)\{\s*(var|let|const)\s+([a-zA-Z0-9_$]+)\s*=\s*this\.buildIframeUrl\([^;]+\);')
+    if ($target.Success) {
+        $urlVar = $target.Groups[2].Value
+        $hookStart = $target.Index + $target.Length
+        $hookEnd = $hookStart
+        $markerAt = $extContent.IndexOf($marker, [System.StringComparison]::Ordinal)
+        if ($markerAt -ne -1) {
+            $prefix = $marker + $urlVar + '=((u)=>{try{'
+            $suffix = '}}catch{}return u})(' + $urlVar + ');'
+            $endAt = $extContent.IndexOf($suffix, $hookStart, [System.StringComparison]::Ordinal)
+            if ($markerAt -eq $hookStart -and $extContent.IndexOf($prefix, $hookStart, [System.StringComparison]::Ordinal) -eq $hookStart -and $endAt -ge 0) {
+                $hookEnd = $endAt + $suffix.Length
+            }
         }
 
-        if ($matchedTarget) {
-            $bak = "$agyExtJs.enhancer.bak"
-            if ($PSCmdlet.ShouldProcess($agyExtJs, "Patch renderIframe with enhancer proxy redirect")) {
-                Copy-Item -LiteralPath $agyExtJs -Destination $bak -Force
-                $hookExpr = $marker + $urlVar + '=((u)=>{try{const p=require("path").join(__dirname,"..","..","..","out","vs","code","electron-browser","workbench","enhance-ide-hook-config.json");const cfg=JSON.parse(require("fs").readFileSync(p,"utf8"));if(cfg&&cfg.port&&/^http:\/\/127\.0\.0\.1:(\d+)/.test(u)){const x=new URL(u);const hp=x.port;x.searchParams.set("__agy_hub",hp);if(cfg.token){x.searchParams.set("__agy_sig",require("crypto").createHmac("sha256",String(cfg.token)).update(String(hp)).digest("hex").slice(0,16));}x.port=String(cfg.port);return x.toString()}}catch{}return u})(' + $urlVar + ');'
-                $extContent = $extContent.Replace($matchedTarget, $matchedTarget + $hookExpr)
-                Write-Utf8NoBom -Path $agyExtJs -Content $extContent
+        if ($markerAt -ne -1 -and $hookEnd -eq $hookStart) {
+            Write-Warning "Existing enhancer iframe patch could not be migrated."
+        } else {
+            $anchor = $target.Value
+            if ($target.Groups[1].Value -eq 'const') {
+                $anchor = $anchor -creplace '\bconst(?=\s)', 'let'
+            }
+            $hookExpr = $marker + $urlVar + '=((u)=>{try{const p=require("path").join(__dirname,"..","..","..","out","vs","code","electron-browser","workbench","enhance-ide-hook-config.json");const cfg=JSON.parse(require("fs").readFileSync(p,"utf8"));if(cfg&&cfg.port&&cfg.token&&/^http:\/\/127\.0\.0\.1:(\d+)/.test(u)){const x=new URL(u);const hp=x.port;x.searchParams.set("__agy_hub",hp);x.searchParams.set("__agy_sig",require("crypto").createHmac("sha256",String(cfg.token)).update(String(hp)).digest("hex").slice(0,16));x.port=String(cfg.port);return x.toString()}}catch{}return u})(' + $urlVar + ');'
+            $remainder = $extContent.Substring($hookEnd)
+            $nextContent = $extContent.Substring(0, $target.Index) + $anchor + $hookExpr + $remainder
+            if ($nextContent -ceq $extContent) {
+                Write-Host "extensions\agy\vscode\extension.js already patched" -ForegroundColor DarkGray
+            } elseif ($PSCmdlet.ShouldProcess($agyExtJs, "Patch renderIframe with enhancer proxy redirect")) {
+                $bak = "$agyExtJs.enhancer.bak"
+                if ($markerAt -eq -1) {
+                    Copy-Item -LiteralPath $agyExtJs -Destination $bak -Force
+                } elseif (-not (Test-Path -LiteralPath $bak)) {
+                    Write-Utf8NoBom -Path $bak -Content ($extContent.Substring(0, $hookStart) + $remainder)
+                }
+                Write-Utf8NoBom -Path $agyExtJs -Content $nextContent
                 Write-Host "Patched extensions\agy\vscode\extension.js" -ForegroundColor Green
             }
-        } else {
-            Write-Host "renderIframe signature not found in extensions\agy\vscode\extension.js" -ForegroundColor Yellow
         }
     } else {
-        Write-Host "extensions\agy\vscode\extension.js already patched" -ForegroundColor DarkGray
+        Write-Host "renderIframe signature not found in extensions\agy\vscode\extension.js" -ForegroundColor Yellow
     }
 }
 

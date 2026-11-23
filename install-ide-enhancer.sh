@@ -193,16 +193,6 @@ if [[ -n "$APP_ROOT" && -d "$WB_DIR" ]]; then
     const ext=require(process.argv[1]);
     const dstDir=process.argv[2], appRoot=process.argv[3], wbDir=process.argv[4];
     const res=ext.ensureIdeHookInstalled({extensionPath:dstDir}, 47831, '', appRoot);
-    const agyJs=path.join(appRoot,'extensions','agy','vscode','extension.js');
-    if(fs.existsSync(agyJs)){
-      const raw=fs.readFileSync(agyJs,'utf8');
-      const patched=ext.patchAgyExtensionContent(raw);
-      if(patched.changed){
-        fs.writeFileSync(agyJs+'.enhancer.bak', raw, 'utf8');
-        fs.writeFileSync(agyJs, patched.content, 'utf8');
-        console.log('Patched extensions/agy/vscode/extension.js');
-      }
-    }
     const cfgPath=path.join(wbDir,'enhance-ide-hook-config.json');
     if(fs.existsSync(cfgPath)) fs.chmodSync(cfgPath, 0o666);
     console.log('Workbench hook status:', JSON.stringify(res));

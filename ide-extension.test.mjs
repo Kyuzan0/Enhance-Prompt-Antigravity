@@ -5,6 +5,7 @@ import http from "node:http";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import vm from "node:vm";
 import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
@@ -66,8 +67,41 @@ test("patchAgyExtensionContent patches both exact and renamed minified signature
   const renamed = 'class Y{renderIframe(x,y,z){const urlVar=this.buildIframeUrl(y,z);this.renderWebviewHtml(x,y,urlVar,z)}}';
   const resRenamed = ext.patchAgyExtensionContent(renamed);
   assert.equal(resRenamed.changed, true);
+  assert.match(resRenamed.content, /let urlVar=this\.buildIframeUrl/);
   assert.equal(resRenamed.content.includes("/*AGY_ENHANCER_IFRAME_HOOK*/urlVar="), true);
   assert.equal(resRenamed.content.endsWith(")(urlVar);this.renderWebviewHtml(x,y,urlVar,z)}}"), true);
+});
+
+test("legacy iframe hooks migrate in place and use the original URL until a signing token is available", () => {
+  const anchor = "renderIframe(a,b,c){var d=this.buildIframeUrl(b,c);";
+  const original = `class View{${anchor}return d;}}`;
+  const fresh = ext.patchAgyExtensionContent(original).content;
+  const setSignature = fresh.match(/x\.searchParams\.set\("__agy_sig"[^;]+;/)[0];
+  const legacyUnsigned = fresh.replace("cfg.port&&cfg.token", "cfg.port").replace(setSignature, "");
+  const legacySigned = fresh.replace("cfg.port&&cfg.token", "cfg.port").replace(setSignature, `if(cfg.token){${setSignature}}`);
+
+  for (const legacy of [legacyUnsigned, legacySigned]) {
+    const result = ext.patchAgyExtensionContent(legacy);
+    assert.equal(result.changed, true);
+    assert.equal(result.originalContent, original);
+    assert.equal(result.content, fresh);
+  }
+
+  const hubUrl = "http://127.0.0.1:40397/?extensionView=true#session";
+  const config = { port: 47831, token: "" };
+  const view = vm.runInNewContext(`new (${fresh})()`, {
+    __dirname,
+    URL,
+    require: (id) => id === "fs" ? { readFileSync: () => JSON.stringify(config) } : require(id),
+  });
+  view.buildIframeUrl = () => hubUrl;
+  assert.equal(view.renderIframe(), hubUrl);
+  config.token = "test-activation-token";
+  const signed = new URL(view.renderIframe());
+  assert.equal(signed.port, String(config.port));
+  assert.equal(signed.searchParams.get("__agy_hub"), "40397");
+  assert.equal(signed.searchParams.get("__agy_sig"), ext.signHubPort(40397, config.token));
+  assert.equal(signed.hash, "#session");
 });
 
 test("buildEnhancePrompt anchors workspace and conversation context while preserving chip tokens", () => {
@@ -199,6 +233,13 @@ test("ensureIdeHookInstalled patches workbench HTML and syncs product.json check
     const p2 = path.join(wbDir, "workbench-jetski-agent.html");
     fs.writeFileSync(p1, html1, "utf8");
     fs.writeFileSync(p2, html2, "utf8");
+    const nativeJs = path.join(tmpApp, "extensions", "agy", "vscode", "extension.js");
+    fs.mkdirSync(path.dirname(nativeJs), { recursive: true });
+    const nativeOriginal = "class X{renderIframe(a,b,c){var d=this.buildIframeUrl(b,c);return d;}}";
+    const nativeExpected = ext.patchAgyExtensionContent(nativeOriginal).content;
+    const nativeLegacy = nativeExpected.replace("cfg.port&&cfg.token", "cfg.port");
+    fs.writeFileSync(nativeJs, nativeLegacy);
+    fs.writeFileSync(`${nativeJs}.enhancer.bak`, nativeOriginal);
 
     const origHash1 = ext.computeFileChecksum(p1);
     const origHash2 = ext.computeFileChecksum(p2);
@@ -216,6 +257,8 @@ test("ensureIdeHookInstalled patches workbench HTML and syncs product.json check
     const res = ext.ensureIdeHookInstalled({ extensionPath: __dirname }, 47831, "tok", tmpApp);
     assert.equal(res.patched, true);
     assert.equal(res.checksumsUpdated, true);
+    assert.equal(fs.readFileSync(nativeJs, "utf8"), nativeExpected);
+    assert.equal(fs.readFileSync(`${nativeJs}.enhancer.bak`, "utf8"), nativeOriginal);
 
     const updatedPj = JSON.parse(fs.readFileSync(pjPath, "utf8"));
     assert.equal(updatedPj.checksums["vs/workbench/workbench.desktop.main.js"], "UNTOUCHED_HASH");
@@ -418,7 +461,37 @@ test("createEnhancerServer enforces HTTP/SSE/WebSocket security, 413 limits, and
       req.end();
     });
 
+  const upstreamRequests = [];
+  const hub = http.createServer((req, res) => {
+    upstreamRequests.push(req.url);
+    res.writeHead(200, { "Content-Type": "text/html" });
+    res.end("<html><body>Agent</body></html>");
+  });
+  await new Promise((resolve) => hub.listen(0, "127.0.0.1", resolve));
   try {
+    const hubPort = hub.address().port;
+    const frame = `/?extensionView=true&__agy_hub=${hubPort}`;
+    const signedFrame = `${frame}&__agy_sig=${ext.signHubPort(hubPort, token)}`;
+    const navigationHeaders = {
+      "sec-fetch-site": "cross-site",
+      "sec-fetch-mode": "navigate",
+      "sec-fetch-dest": "iframe",
+    };
+    assert.equal((await reqJson(frame, { headers: navigationHeaders })).status, 403);
+    assert.equal((await reqJson(signedFrame, { headers: { ...navigationHeaders, "sec-fetch-dest": "script" } })).status, 403);
+    assert.equal((await reqJson(signedFrame, { method: "POST", headers: navigationHeaders })).status, 403);
+    assert.equal((await reqJson(signedFrame, { headers: { ...navigationHeaders, origin: "https://external.example" } })).status, 403);
+    assert.equal((await reqJson(`/__enhancer/config.json${signedFrame.slice(1)}`, { headers: navigationHeaders })).status, 403);
+    assert.deepEqual(upstreamRequests, []);
+
+    const loaded = await reqJson(signedFrame, { headers: navigationHeaders });
+    assert.equal(loaded.status, 200);
+    assert.match(loaded.body, /\/__enhancer\/hook\.js/);
+    assert.deepEqual(upstreamRequests, ["/?extensionView=true"]);
+    assert.equal((await reqJson("/assets/main.js", {
+      headers: { "sec-fetch-site": "same-origin", referer: `http://127.0.0.1:${port}${signedFrame}` },
+    })).status, 200);
+
     // 1. hook.js 200 + CORP + cross-site/same-site 403
     const hookOk = await reqJson("/__enhancer/hook.js");
     assert.equal(hookOk.status, 200);
@@ -531,6 +604,7 @@ test("createEnhancerServer enforces HTTP/SSE/WebSocket security, 413 limits, and
     assert.equal(wsUntrustedHub.startsWith("HTTP/1.1 403 Forbidden"), true);
   } finally {
     srv.dispose();
+    await new Promise((resolve) => hub.close(resolve));
   }
 });
 

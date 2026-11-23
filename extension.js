@@ -541,38 +541,42 @@ function buildIframeHookSnippet(varName) {
     `${IFRAME_HOOK_MARKER}${varName}=((u)=>{try{` +
     `const p=require("path").join(__dirname,"..","..","..","out","vs","code","electron-browser","workbench","${HOOK_CONFIG_NAME}");` +
     `const cfg=JSON.parse(require("fs").readFileSync(p,"utf8"));` +
-    `if(cfg&&cfg.port&&/^http:\\/\\/127\\.0\\.0\\.1:(\\d+)/.test(u)){` +
+    `if(cfg&&cfg.port&&cfg.token&&/^http:\\/\\/127\\.0\\.0\\.1:(\\d+)/.test(u)){` +
     `const x=new URL(u);const hp=x.port;x.searchParams.set("__agy_hub",hp);` +
-    `if(cfg.token){x.searchParams.set("__agy_sig",require("crypto").createHmac("sha256",String(cfg.token)).update(String(hp)).digest("hex").slice(0,16));}` +
+    `x.searchParams.set("__agy_sig",require("crypto").createHmac("sha256",String(cfg.token)).update(String(hp)).digest("hex").slice(0,16));` +
     `x.port=String(cfg.port);return x.toString()` +
     `}}catch{}return u})(${varName});`
   );
 }
 
 function patchAgyExtensionContent(content) {
-  if (!content || content.includes(IFRAME_HOOK_MARKER)) {
-    return { changed: false, content };
+  const match = content?.match(/renderIframe\([^)]*\)\{\s*(var|let|const)\s+([a-zA-Z0-9_$]+)\s*=\s*this\.buildIframeUrl\([^;]+\);/);
+  if (!match) return { changed: false, content };
+
+  const [anchor, declaration, urlVar] = match;
+  const hookStart = match.index + anchor.length;
+  let hookEnd = hookStart;
+  const markerAt = content.indexOf(IFRAME_HOOK_MARKER);
+  if (markerAt !== -1) {
+    if (markerAt !== hookStart || !content.startsWith(`${IFRAME_HOOK_MARKER}${urlVar}=((u)=>{try{`, hookStart)) {
+      return { changed: false, content };
+    }
+    // Both earlier hook formats end with this invocation of the original URL variable.
+    const suffix = `}}catch{}return u})(${urlVar});`;
+    const endAt = content.indexOf(suffix, hookStart);
+    if (endAt === -1) return { changed: false, content };
+    hookEnd = endAt + suffix.length;
   }
 
-  const exactTarget = "renderIframe(a,b,c){var d=this.buildIframeUrl(b,c);";
-  if (content.includes(exactTarget)) {
-    return {
-      changed: true,
-      content: content.replace(exactTarget, exactTarget + buildIframeHookSnippet("d")),
-    };
-  }
-
-  // Fallback for future minified variable renames across Antigravity IDE updates.
-  const regexTarget = /(renderIframe\([^)]*\)\{\s*(?:var|let|const)\s+([a-zA-Z0-9_$]+)\s*=\s*this\.buildIframeUrl\([^;]+\);)/;
-  const match = content.match(regexTarget);
-  if (!match) {
+  const writableAnchor = declaration === "const" ? anchor.replace(/\bconst(?=\s)/, "let") : anchor;
+  const hook = buildIframeHookSnippet(urlVar);
+  if (anchor === writableAnchor && content.slice(hookStart, hookEnd) === hook) {
     return { changed: false, content };
   }
-  const matchedPrefix = match[1];
-  const urlVar = match[2];
   return {
     changed: true,
-    content: content.replace(matchedPrefix, matchedPrefix + buildIframeHookSnippet(urlVar)),
+    content: content.slice(0, match.index) + writableAnchor + hook + content.slice(hookEnd),
+    originalContent: content.slice(0, hookStart) + content.slice(hookEnd),
   };
 }
 
@@ -649,17 +653,17 @@ function syncProductJsonChecksums(appRoot) {
   return { updated: true, updatedKeys: updates.map((u) => u.relKey) };
 }
 
-function patchAgyExtensionIframe() {
-  if (!vscode) return false;
-  const agyExtJs = path.join(vscode.env.appRoot, "extensions", "agy", "vscode", "extension.js");
+function patchAgyExtensionIframe(appRoot) {
+  const agyExtJs = path.join(appRoot, "extensions", "agy", "vscode", "extension.js");
   if (!fs.existsSync(agyExtJs)) return false;
   const content = fs.readFileSync(agyExtJs, "utf8");
   const patched = patchAgyExtensionContent(content);
   if (!patched.changed) return false;
 
   const bakPath = `${agyExtJs}.enhancer.bak`;
-  // Target is currently unpatched (fresh install or IDE update), so always refresh backup to match current version.
-  fs.writeFileSync(bakPath, content, "utf8");
+  if (patched.originalContent === content || !fs.existsSync(bakPath)) {
+    fs.writeFileSync(bakPath, patched.originalContent, "utf8");
+  }
 
   fs.writeFileSync(agyExtJs, patched.content, "utf8");
   return true;
@@ -728,7 +732,7 @@ function ensureIdeHookInstalled(context, port, token, appRootOverride = "", opti
     console.error("[PromptEnhancer] Failed to sync product.json checksums:", err);
   }
 
-  const iframePatched = appRootOverride ? false : patchAgyExtensionIframe();
+  const iframePatched = patchAgyExtensionIframe(appRoot);
 
   return { patched: htmlPatched || iframePatched, hookUpdated, checksumsUpdated, configWritten, reason: writeError || undefined };
 }
@@ -784,7 +788,7 @@ function resolveHubTarget(rawUrl, headersOrFallback = {}, fallbackPort = 0) {
     const u = new URL(rawUrl || "/", "http://127.0.0.1");
     const qPort = Number(u.searchParams.get("__agy_hub") || 0);
     const qSig = u.searchParams.get("__agy_sig") || "";
-    if (qPort > 0 && qPort < 65536) {
+    if (Number.isInteger(qPort) && qPort > 0 && qPort < 65536) {
       u.searchParams.delete("__agy_hub");
       u.searchParams.delete("__agy_sig");
       const res = { hubPort: qPort, forwardPath: u.pathname + u.search, fromQuery: true };
@@ -825,10 +829,10 @@ function isAllowedEnhancerOrigin(origin, serverPort) {
   return false;
 }
 
-function isAllowedEnhancerRequest(req, serverPort) {
+function isAllowedEnhancerRequest(req, serverPort, { signedIframeNavigation = false } = {}) {
   const headers = (req && req.headers) || {};
   const sfs = String(headers["sec-fetch-site"] || "").toLowerCase();
-  if (sfs === "cross-site") return false;
+  if (sfs === "cross-site" && !signedIframeNavigation) return false;
 
   const origin = headers.origin || headers.Origin || "";
   if (origin && !isAllowedEnhancerOrigin(origin, serverPort)) return false;
@@ -854,6 +858,15 @@ function isAllowedEnhancerRequest(req, serverPort) {
   }
 
   return true;
+}
+
+function isHubIframeNavigation(req, forwardPath) {
+  if (req.method !== "GET" || req.headers["sec-fetch-mode"] !== "navigate" ||
+      req.headers["sec-fetch-dest"] !== "iframe" || forwardPath.startsWith("/__enhancer/")) {
+    return false;
+  }
+  const queryAt = forwardPath.indexOf("?");
+  return queryAt !== -1 && new URLSearchParams(forwardPath.slice(queryAt + 1)).get("extensionView") === "true";
 }
 
 function applyEnhancerCorsHeaders(req, res, serverPort) {
@@ -1301,34 +1314,28 @@ function createEnhancerServer({
       return;
     }
 
-    if (!isAllowedEnhancerRequest(req, serverPort)) {
+    const { hubPort, forwardPath, fromQuery, hubSig } = resolveHubTarget(req.url, req.headers, lastHubPort);
+    const sigOk = fromQuery && verifyHubPortSignature(hubPort, hubSig, token);
+    // Chromium treats the initial navigation from the native VS Code webview as cross-site.
+    const signedIframeNavigation = sigOk && isHubIframeNavigation(req, forwardPath);
+    if (!isAllowedEnhancerRequest(req, serverPort, { signedIframeNavigation })) {
       res.writeHead(403, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: false, error: "Forbidden" }));
       return;
     }
 
-    const target = resolveHubTarget(req.url, req.headers, lastHubPort);
-    const { hubPort, forwardPath, fromQuery, hubSig } = target;
-    if (hubPort > 0) {
-      if (fromQuery) {
-        const sigOk = verifyHubPortSignature(hubPort, hubSig, token);
-        const reqOrigin = req.headers.origin || req.headers.Origin || "";
-        if (!sigOk && reqOrigin && !isAllowedEnhancerOrigin(reqOrigin, serverPort)) {
-          res.writeHead(403, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: "Untrusted hub target" }));
-          return;
-        }
-        trustedHubPorts.add(hubPort);
-      } else {
-        trustedHubPorts.add(hubPort);
-      }
-      lastHubPort = hubPort;
-    }
     if (!hubPort) {
       res.writeHead(502, { "Content-Type": "text/plain" });
       res.end("Antigravity hub port not yet known");
       return;
     }
+    if (hubPort === serverPort || !(fromQuery ? sigOk : trustedHubPorts.has(hubPort))) {
+      res.writeHead(403, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "Untrusted hub target" }));
+      return;
+    }
+    if (sigOk) trustedHubPorts.add(hubPort);
+    lastHubPort = hubPort;
 
     const headers = { ...req.headers, host: `127.0.0.1:${hubPort}` };
     delete headers["accept-encoding"];
@@ -1417,8 +1424,8 @@ function createEnhancerServer({
 
     const { hubPort, forwardPath, fromQuery, hubSig } = resolveHubTarget(req.url, req.headers, lastHubPort);
     const sigOk = fromQuery && verifyHubPortSignature(hubPort, hubSig, token);
-    const portTrusted = hubPort > 0 && (trustedHubPorts.has(hubPort) || sigOk);
-    if (!hubPort || !portTrusted) {
+    const portTrusted = fromQuery ? sigOk : trustedHubPorts.has(hubPort);
+    if (!hubPort || hubPort === serverPort || !portTrusted) {
       try {
         clientSocket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
       } catch {
