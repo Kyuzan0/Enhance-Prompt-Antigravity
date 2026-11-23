@@ -31,6 +31,7 @@ const PERSISTABLE_SETTING_KEYS = [
   "outputLanguage",
   "detailLevel",
   "preset",
+  "customInstructionsEnabled",
   "customInstructions",
   "includeWorkspaceContext",
   "includeConversationContext",
@@ -43,6 +44,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   outputLanguage: "auto",
   detailLevel: "balanced",
   preset: "general",
+  customInstructionsEnabled: false,
   customInstructions: "",
   includeWorkspaceContext: true,
   includeConversationContext: true,
@@ -104,6 +106,10 @@ function normalizeSettings(raw) {
     outputLanguage: VALID_OUTPUT_LANGUAGES.has(lang) ? lang : DEFAULT_SETTINGS.outputLanguage,
     detailLevel: VALID_DETAIL_LEVELS.has(detail) ? detail : DEFAULT_SETTINGS.detailLevel,
     preset: VALID_PRESETS.has(preset) ? preset : DEFAULT_SETTINGS.preset,
+    customInstructionsEnabled:
+      src.customInstructionsEnabled !== undefined
+        ? Boolean(src.customInstructionsEnabled)
+        : DEFAULT_SETTINGS.customInstructionsEnabled,
     customInstructions,
     includeWorkspaceContext:
       src.includeWorkspaceContext !== undefined ? Boolean(src.includeWorkspaceContext) : DEFAULT_SETTINGS.includeWorkspaceContext,
@@ -394,7 +400,7 @@ function buildEnhancePrompt(draft, context, workspaceContext, settings) {
   if (presetGuidance) {
     parts.push(presetGuidance);
   }
-  if (effectiveSettings.customInstructions) {
+  if (effectiveSettings.customInstructionsEnabled && effectiveSettings.customInstructions) {
     parts.push(
       "",
       "<custom_instructions>",

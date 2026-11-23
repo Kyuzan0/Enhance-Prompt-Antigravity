@@ -2,7 +2,7 @@
   "name": "ag-ide-prompt-enhancer",
   "displayName": "Antigravity IDE Prompt Enhancer",
   "description": "Adds an Enhance Prompt button, customizable keyboard shortcut, and settings in Antigravity IDE while preserving @mentions and attachments.",
-  "version": "1.4.5",
+  "version": "1.4.6",
   "publisher": "kyuzan0",
   "icon": "assets/icon.png",
   "galleryBanner": {
@@ -130,6 +130,11 @@
           ],
           "default": "general",
           "description": "Enhancement mode preset: general, debug (bug fix & reproduction), refactor (cleanup & safety), or architecture (design & plan)."
+        },
+        "antigravityPromptEnhancer.customInstructionsEnabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable applying custom instructions when enhancing prompts."
         },
         "antigravityPromptEnhancer.customInstructions": {
           "type": "string",

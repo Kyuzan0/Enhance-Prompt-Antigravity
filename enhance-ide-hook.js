@@ -14,6 +14,7 @@
     outputLanguage: "auto",
     detailLevel: "balanced",
     preset: "general",
+    customInstructionsEnabled: false,
     customInstructions: "",
     includeWorkspaceContext: true,
     includeConversationContext: true,
@@ -190,7 +191,7 @@
       .agy-sp-row.disabled {
         opacity: 0.45;
       }
-      .agy-sp-row label {
+      .agy-sp-row > label:not(.agy-sp-switch) {
         flex: 1;
         min-width: 0;
         cursor: pointer;
@@ -241,6 +242,7 @@
         position: relative;
         display: inline-flex;
         align-items: center;
+        flex: 0 0 32px;
         width: 32px;
         height: 18px;
         flex-shrink: 0;
@@ -1404,11 +1406,14 @@
 
     const customRow = document.createElement("div");
     customRow.style.marginBottom = "8px";
+
+    const customBody = document.createElement("div");
     const customLabelRow = document.createElement("div");
     customLabelRow.className = "agy-sp-label-row";
-    const customLabel = document.createElement("label");
-    customLabel.setAttribute("for", "agy-sp-customInstructions");
-    customLabel.textContent = "Custom Instructions";
+    const customSubLabel = document.createElement("span");
+    customSubLabel.style.fontSize = "10px";
+    customSubLabel.style.opacity = "0.65";
+    customSubLabel.textContent = "Applied to every enhancement";
     const customMeta = document.createElement("span");
     customMeta.className = "agy-sp-label-meta";
     const customCount = document.createElement("span");
@@ -1418,7 +1423,7 @@
     customClearBtn.textContent = "Clear";
     customMeta.appendChild(customCount);
     customMeta.appendChild(customClearBtn);
-    customLabelRow.appendChild(customLabel);
+    customLabelRow.appendChild(customSubLabel);
     customLabelRow.appendChild(customMeta);
 
     const customInput = document.createElement("textarea");
@@ -1435,6 +1440,22 @@
       customClearBtn.style.display = len > 0 ? "inline" : "none";
     };
     updateCustomMeta();
+
+    const syncCustomEnabledUi = (enabled) => {
+      customBody.style.display = enabled ? "block" : "none";
+    };
+
+    const customToggle = buildCheckboxRow(
+      "Custom Instructions",
+      "customInstructionsEnabled",
+      statusEl,
+      (enabled) => {
+        syncCustomEnabledUi(enabled);
+        if (enabled) customInput.focus();
+      }
+    );
+    pop.appendChild(customToggle.row);
+    syncCustomEnabledUi(Boolean(currentSettings.customInstructionsEnabled));
 
     let customDebounceTimer = null;
     let lastSavedCustom = (currentSettings.customInstructions || "").trim().slice(0, 400);
@@ -1464,8 +1485,9 @@
       flushCustomInstructions();
     });
 
-    customRow.appendChild(customLabelRow);
-    customRow.appendChild(customInput);
+    customBody.appendChild(customLabelRow);
+    customBody.appendChild(customInput);
+    customRow.appendChild(customBody);
     pop.appendChild(customRow);
 
     pop.appendChild(buildSectionHeading("Context & Feedback", false));
@@ -1485,6 +1507,8 @@
       langSelect.select.value = currentSettings.outputLanguage || "auto";
       detailSelect.select.value = currentSettings.detailLevel || "balanced";
       presetSelect.select.value = currentSettings.preset || "general";
+      customToggle.input.checked = Boolean(currentSettings.customInstructionsEnabled);
+      syncCustomEnabledUi(Boolean(currentSettings.customInstructionsEnabled));
       if (document.activeElement !== customInput) {
         const nextCustom = currentSettings.customInstructions || "";
         customInput.value = nextCustom;

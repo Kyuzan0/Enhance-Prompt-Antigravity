@@ -190,6 +190,7 @@ test("normalizeShortcut and normalizeSettings enforce valid defaults and modifie
     outputLanguage: "auto",
     detailLevel: "concise",
     preset: "general",
+    customInstructionsEnabled: false,
     customInstructions: "",
     includeWorkspaceContext: false,
     includeConversationContext: true,
@@ -380,6 +381,7 @@ test("buildEnhancePrompt frames untrusted data, disarms closing tags, and applie
     "Workspace path: /repo",
     {
       preset: "debug",
+      customInstructionsEnabled: true,
       customInstructions: "Focus on minimal diff.",
     }
   );
@@ -390,6 +392,13 @@ test("buildEnhancePrompt frames untrusted data, disarms closing tags, and applie
   );
   assert.equal(prompt.includes("Focus preset (Debug):"), true);
   assert.equal(prompt.includes("<custom_instructions>\nFocus on minimal diff.\n</custom_instructions>"), true);
+
+  const disabledPrompt = ext.buildEnhancePrompt("fix bug", "", "", {
+    customInstructionsEnabled: false,
+    customInstructions: "Should not appear when disabled.",
+  });
+  assert.equal(disabledPrompt.includes("<custom_instructions>"), false);
+  assert.equal(disabledPrompt.includes("Should not appear when disabled."), false);
 });
 
 test("buildSanitizedCliEnv strips Antigravity session vars and isModelNotFoundError distinguishes errors", () => {

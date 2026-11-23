@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.6] - 2026-11-23
+
+### Added
+- Enable/disable toggle (`customInstructionsEnabled`, default `false`) for Custom Instructions in Quick Settings (`⚙`) and VS Code configuration; hides the textarea and omits `<custom_instructions>` from prompts when turned off.
+
+### Fixed
+- Fixed stretched toggle switches in Quick Settings (`⚙`) by scoping `.agy-sp-row > label:not(.agy-sp-switch)` and locking `.agy-sp-switch` to `32px × 18px`.
+
 ## [1.4.5] - 2026-11-23
 
 ### Fixed
@@ -94,7 +102,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial release of Antigravity IDE Prompt Enhancer with in-chat **✦ Enhance Prompt** button, loopback reverse proxy, multi-window `__agy_hub` routing, Lexical `@mention`/chip preservation, and strict tool-deny `agy -p` execution.
 
-[Unreleased]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.4.5...HEAD
+[Unreleased]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.4.6...HEAD
+[1.4.6]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.4.5...v1.4.6
 [1.4.5]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.4.4...v1.4.5
 [1.4.4]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.4.3...v1.4.4
 [1.4.3]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.4.2...v1.4.3
