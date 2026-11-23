@@ -1015,11 +1015,15 @@ function readRequestBody(req, res, maxBytes, onComplete) {
     body += chunk;
     if (body.length > maxBytes) {
       aborted = true;
+      req.pause();
       if (!res.headersSent) {
-        res.writeHead(413, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: false, error: "Payload too large" }));
+        res.writeHead(413, { "Content-Type": "application/json", Connection: "close" });
+        res.end(JSON.stringify({ ok: false, error: "Payload too large" }), () => {
+          if (!req.destroyed) req.destroy();
+        });
+      } else if (!req.destroyed) {
+        req.destroy();
       }
-      req.destroy();
     }
   });
   req.on("end", () => {

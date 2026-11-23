@@ -34,6 +34,7 @@ jobs:
           if-no-files-found: error
 
       - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: build/ag-ide-prompt-enhancer-*.vsix
@@ -67,20 +68,22 @@ jobs:
       contents: read
     steps:
       - name: Download VSIX build artifact
-        if: ${{ secrets.VSCE_PAT != '' }}
         uses: actions/download-artifact@v4
         with:
           name: vsix-package
           path: build
 
       - name: Setup Node.js
-        if: ${{ secrets.VSCE_PAT != '' }}
         uses: actions/setup-node@v4
         with:
           node-version: "20"
 
       - name: Publish to Visual Studio Marketplace
-        if: ${{ secrets.VSCE_PAT != '' }}
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
-        run: npx --yes @vscode/vsce publish --packagePath build/ag-ide-prompt-enhancer-*.vsix -p "$VSCE_PAT"
+        run: |
+          if [ -n "$VSCE_PAT" ]; then
+            npx --yes @vscode/vsce publish --packagePath build/ag-ide-prompt-enhancer-*.vsix -p "$VSCE_PAT"
+          else
+            echo "VSCE_PAT not set; skipping Visual Studio Marketplace publish."
+          fi

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.5] - 2026-11-23
+
+### Fixed
+- Flush `413 Payload Too Large` HTTP response with `Connection: close` before destroying oversized request sockets (fixes Node 20 `ECONNRESET` in CI).
+- Fixed `.github/workflows/release.yml` schema by removing `secrets.*` from step `if:` conditionals and checking `VSCE_PAT` in shell.
+
 ## [1.4.4] - 2026-11-23
 
 ### Fixed
@@ -88,7 +94,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial release of Antigravity IDE Prompt Enhancer with in-chat **✦ Enhance Prompt** button, loopback reverse proxy, multi-window `__agy_hub` routing, Lexical `@mention`/chip preservation, and strict tool-deny `agy -p` execution.
 
-[Unreleased]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.4.4...HEAD
+[Unreleased]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.4.5...HEAD
+[1.4.5]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.4.4...v1.4.5
 [1.4.4]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.4.3...v1.4.4
 [1.4.3]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.4.2...v1.4.3
 [1.4.2]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.4.1...v1.4.2
