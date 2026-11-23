@@ -29,8 +29,14 @@
   };
   let isRecordingShortcut = false;
   let activePopoverEl = null;
+  let activePopoverSync = null;
+  let activePopoverFlush = null;
+  let statusClearTimer = null;
   let toastTimer = null;
   let toastEl = null;
+  let toastRemainingMs = 0;
+  let toastStartedAt = 0;
+  let toastPaused = false;
   let styleInjected = false;
   let activeAbortController = null;
   let lastSnapshot = null;
@@ -90,6 +96,9 @@
         animation: agyEnhanceSpin 1.1s linear infinite;
         color: #facc15;
       }
+      .agy-enhance-btn.agy-enhancing:hover svg {
+        color: #f87171;
+      }
       .agy-enhance-btn.agy-error {
         color: #f87171;
         opacity: 1;
@@ -97,7 +106,11 @@
       .agy-settings-popover {
         position: fixed;
         z-index: 99999;
-        width: 286px;
+        width: 304px;
+        max-width: calc(100vw - 24px);
+        max-height: calc(100vh - 24px);
+        overflow-y: auto;
+        box-sizing: border-box;
         padding: 12px;
         border-radius: 8px;
         background: var(--vscode-editorWidget-background, #1f2228);
@@ -123,6 +136,9 @@
         font-size: 11px;
         color: #4ade80;
       }
+      .agy-sp-status.error {
+        color: #f87171;
+      }
       .agy-sp-title-wrap {
         display: inline-flex;
         align-items: center;
@@ -135,6 +151,21 @@
         padding: 1px 5px;
         border-radius: 4px;
         background: rgba(128,128,128,0.18);
+      }
+      .agy-sp-section {
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        opacity: 0.55;
+        margin: 10px 0 6px 0;
+        padding-top: 8px;
+        border-top: 1px solid rgba(128,128,128,0.16);
+      }
+      .agy-sp-section.first {
+        margin-top: 0;
+        padding-top: 0;
+        border-top: none;
       }
       .agy-sp-credit {
         margin-top: 8px;
@@ -153,11 +184,15 @@
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 8px;
+        gap: 10px;
         margin-bottom: 8px;
+      }
+      .agy-sp-row.disabled {
+        opacity: 0.45;
       }
       .agy-sp-row label {
         flex: 1;
+        min-width: 0;
         cursor: pointer;
         user-select: none;
       }
@@ -168,45 +203,157 @@
         border-radius: 4px;
         padding: 3px 6px;
         font-size: 11px;
+        height: 26px;
+        box-sizing: border-box;
         outline: none;
+      }
+      .agy-sp-select {
+        width: 158px;
+        flex-shrink: 0;
       }
       .agy-sp-shortcut-wrap {
         display: flex;
         align-items: center;
         gap: 4px;
+        width: 158px;
+        flex-shrink: 0;
       }
       .agy-sp-shortcut-input {
-        width: 112px;
+        flex: 1;
+        min-width: 0;
         text-align: center;
         cursor: pointer;
       }
-      .agy-sp-shortcut-input:focus {
+      .agy-sp-shortcut-input:disabled, .agy-sp-mini-btn:disabled {
+        cursor: not-allowed;
+        opacity: 0.6;
+      }
+      .agy-sp-shortcut-input:focus,
+      .agy-sp-select:focus-visible,
+      .agy-sp-textarea:focus-visible,
+      .agy-sp-mini-btn:focus-visible,
+      .agy-toast-undo:focus-visible {
         border-color: #60a5fa;
+        outline: 1px solid #60a5fa;
+        outline-offset: 1px;
+      }
+      .agy-sp-switch {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        width: 32px;
+        height: 18px;
+        flex-shrink: 0;
+        cursor: pointer;
+      }
+      .agy-sp-switch input {
+        position: absolute;
+        opacity: 0;
+        width: 0;
+        height: 0;
+      }
+      .agy-sp-slider {
+        position: absolute;
+        inset: 0;
+        background: rgba(128, 128, 128, 0.35);
+        border-radius: 9999px;
+        transition: background-color 0.15s ease;
+      }
+      .agy-sp-slider::before {
+        content: "";
+        position: absolute;
+        width: 14px;
+        height: 14px;
+        left: 2px;
+        top: 2px;
+        border-radius: 9999px;
+        background: #ffffff;
+        transition: transform 0.15s ease;
+      }
+      .agy-sp-switch input:checked + .agy-sp-slider {
+        background: #3b82f6;
+      }
+      .agy-sp-switch input:checked + .agy-sp-slider::before {
+        transform: translateX(14px);
+      }
+      .agy-sp-switch input:focus-visible + .agy-sp-slider {
+        outline: 1px solid #60a5fa;
+        outline-offset: 2px;
       }
       .agy-sp-mini-btn {
         background: rgba(128,128,128,0.18);
         color: inherit;
         border: none;
         border-radius: 4px;
-        padding: 3px 7px;
+        padding: 3px 8px;
+        height: 26px;
+        box-sizing: border-box;
         font-size: 11px;
         cursor: pointer;
+        flex-shrink: 0;
       }
-      .agy-sp-mini-btn:hover {
+      .agy-sp-mini-btn:hover:not(:disabled) {
         background: rgba(128,128,128,0.3);
       }
       .agy-sp-footer {
         display: flex;
         justify-content: space-between;
         align-items: center;
+        gap: 6px;
         margin-top: 10px;
         padding-top: 8px;
         border-top: 1px solid rgba(128,128,128,0.22);
+      }
+      .agy-sp-footer-right {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
       }
       .agy-sp-hint {
         font-size: 10px;
         opacity: 0.72;
         margin: -4px 0 8px 0;
+      }
+      .agy-sp-label-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 6px;
+      }
+      .agy-sp-label-meta {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 10px;
+        opacity: 0.7;
+      }
+      .agy-sp-clear-link {
+        background: none;
+        border: none;
+        padding: 0;
+        color: var(--vscode-textLink-foreground, #60a5fa);
+        font-size: 10px;
+        cursor: pointer;
+      }
+      .agy-sp-clear-link:hover {
+        text-decoration: underline;
+      }
+      .agy-sp-textarea {
+        width: 100%;
+        box-sizing: border-box;
+        margin-top: 4px;
+        background: var(--vscode-input-background, #14161a);
+        color: var(--vscode-input-foreground, #e5e7eb);
+        border: 1px solid var(--vscode-input-border, rgba(255,255,255,0.18));
+        border-radius: 4px;
+        padding: 5px 6px;
+        font-family: inherit;
+        font-size: 11px;
+        line-height: 1.35;
+        resize: vertical;
+        min-height: 44px;
+        max-height: 96px;
+        outline: none;
       }
       .agy-toast-pill {
         position: fixed;
@@ -375,12 +522,35 @@
     }
   }
 
+  function scheduleToastHide(ms) {
+    clearTimeout(toastTimer);
+    toastRemainingMs = ms;
+    toastStartedAt = Date.now();
+    if (toastPaused) return;
+    toastTimer = setTimeout(() => {
+      if (toastEl) toastEl.classList.remove("visible");
+    }, ms);
+  }
+
   function showToast(anchorEl, text, isError, options) {
     if (!currentSettings.showToast || typeof document === "undefined" || !document.body) return;
     ensureStyle();
     if (!toastEl) {
       toastEl = document.createElement("div");
       toastEl.className = "agy-toast-pill";
+      toastEl.addEventListener("mouseenter", () => {
+        toastPaused = true;
+        clearTimeout(toastTimer);
+        if (toastStartedAt) {
+          toastRemainingMs = Math.max(1200, toastRemainingMs - (Date.now() - toastStartedAt));
+        }
+      });
+      toastEl.addEventListener("mouseleave", () => {
+        toastPaused = false;
+        if (toastEl && toastEl.classList.contains("visible")) {
+          scheduleToastHide(Math.max(1500, toastRemainingMs || 2000));
+        }
+      });
       document.body.appendChild(toastEl);
     }
     const opts = options && typeof options === "object" ? options : {};
@@ -395,6 +565,7 @@
       undoBtn.addEventListener("click", (e) => {
         e.preventDefault();
         e.stopPropagation();
+        toastPaused = false;
         opts.undoAction();
       });
       toastEl.appendChild(undoBtn);
@@ -411,11 +582,8 @@
       toastEl.style.right = "16px";
       toastEl.style.bottom = "56px";
     }
-    clearTimeout(toastTimer);
-    const durationMs = opts.durationMs || (hasUndo ? 7000 : 2800);
-    toastTimer = setTimeout(() => {
-      if (toastEl) toastEl.classList.remove("visible");
-    }, durationMs);
+    toastPaused = false;
+    scheduleToastHide(opts.durationMs || (hasUndo ? 7000 : 2800));
   }
 
   function createSparkleSvg() {
@@ -878,6 +1046,7 @@
     activeAbortController = ac;
     btn.classList.remove("agy-error");
     btn.classList.add("agy-enhancing");
+    btn.setAttribute("aria-busy", "true");
     btn.disabled = false;
     btn.title = "Enhancing... (click or press shortcut to cancel)";
 
@@ -949,6 +1118,7 @@
     } finally {
       if (activeAbortController === ac) activeAbortController = null;
       btn.classList.remove("agy-enhancing");
+      btn.removeAttribute("aria-busy");
       syncButtonDisabled(btn, inputEl);
     }
   }
@@ -972,47 +1142,87 @@
         currentSettings = { ...DEFAULT_UI_SETTINGS, ...data.settings };
         refreshAllTooltips();
         if (statusEl) {
+          statusEl.classList.remove("error");
           statusEl.textContent = "Saved";
-          setTimeout(() => {
+          clearTimeout(statusClearTimer);
+          statusClearTimer = setTimeout(() => {
             if (statusEl) statusEl.textContent = "";
           }, 1500);
         }
         return currentSettings;
       }
+      if (statusEl) {
+        statusEl.classList.add("error");
+        statusEl.textContent = "Save error";
+        clearTimeout(statusClearTimer);
+        statusClearTimer = setTimeout(() => {
+          if (statusEl) statusEl.textContent = "";
+        }, 2500);
+      }
     } catch (err) {
       console.warn("[EnhanceHook] Failed to save settings:", err);
-      if (statusEl) statusEl.textContent = "Save error";
+      if (statusEl) {
+        statusEl.classList.add("error");
+        statusEl.textContent = "Save error";
+        clearTimeout(statusClearTimer);
+        statusClearTimer = setTimeout(() => {
+          if (statusEl) statusEl.textContent = "";
+        }, 2500);
+      }
     }
     return currentSettings;
   }
 
   function closeSettingsPopover() {
     isRecordingShortcut = false;
+    if (typeof activePopoverFlush === "function") {
+      try {
+        activePopoverFlush();
+      } catch {
+        // ignore
+      }
+    }
+    activePopoverFlush = null;
+    activePopoverSync = null;
     if (activePopoverEl && activePopoverEl.parentNode) {
       activePopoverEl.parentNode.removeChild(activePopoverEl);
     }
     activePopoverEl = null;
   }
 
-  function buildCheckboxRow(labelText, key, statusEl) {
+  function buildSectionHeading(text, isFirst) {
+    const h = document.createElement("div");
+    h.className = isFirst ? "agy-sp-section first" : "agy-sp-section";
+    h.textContent = text;
+    return h;
+  }
+
+  function buildCheckboxRow(labelText, key, statusEl, onToggle) {
     const row = document.createElement("div");
     row.className = "agy-sp-row";
     const id = `agy-sp-${key}`;
     const label = document.createElement("label");
     label.setAttribute("for", id);
     label.textContent = labelText;
+    const switchWrap = document.createElement("label");
+    switchWrap.className = "agy-sp-switch";
     const input = document.createElement("input");
     input.type = "checkbox";
     input.id = id;
     input.checked = Boolean(currentSettings[key]);
+    const slider = document.createElement("span");
+    slider.className = "agy-sp-slider";
     input.addEventListener("change", () => {
       currentSettings[key] = input.checked;
       refreshAllTooltips();
+      if (typeof onToggle === "function") onToggle(input.checked);
       saveSettingsPatch({ [key]: input.checked }, statusEl);
     });
+    switchWrap.appendChild(input);
+    switchWrap.appendChild(slider);
     row.appendChild(label);
-    row.appendChild(input);
-    return row;
+    row.appendChild(switchWrap);
+    return { row, input };
   }
 
   function buildSelectRow(labelText, key, options, statusEl) {
@@ -1038,7 +1248,7 @@
     });
     row.appendChild(label);
     row.appendChild(select);
-    return row;
+    return { row, select };
   }
 
   function toggleSettingsPopover(anchorBtn) {
@@ -1071,7 +1281,7 @@
     header.appendChild(statusEl);
     pop.appendChild(header);
 
-    pop.appendChild(buildCheckboxRow("Enable Shortcut", "shortcutEnabled", statusEl));
+    pop.appendChild(buildSectionHeading("Shortcut", true));
 
     // Interactive shortcut recorder row
     const scRow = document.createElement("div");
@@ -1086,7 +1296,9 @@
     scInput.className = "agy-sp-shortcut-input";
     scInput.value = currentSettings.shortcut || DEFAULT_UI_SETTINGS.shortcut;
     scInput.title = "Click and press desired shortcut combination";
-    const defaultShortcutHint = "Click shortcut box, then press keys (e.g. Ctrl+Alt+E).";
+    const defaultShortcutHint = IS_MAC
+      ? "Click shortcut box, then press keys (e.g. Cmd+Alt+E)."
+      : "Click shortcut box, then press keys (e.g. Ctrl+Alt+E).";
     let pendingWarningHint = "";
     const scHint = document.createElement("div");
     scHint.className = "agy-sp-hint";
@@ -1137,81 +1349,159 @@
       saveSettingsPatch({ shortcut: DEFAULT_UI_SETTINGS.shortcut }, statusEl);
     });
 
+    const syncShortcutEnabledUi = (enabled) => {
+      scRow.classList.toggle("disabled", !enabled);
+      scInput.disabled = !enabled;
+      resetBtn.disabled = !enabled;
+    };
+
+    const shortcutToggle = buildCheckboxRow("Enable Shortcut", "shortcutEnabled", statusEl, syncShortcutEnabledUi);
+    pop.appendChild(shortcutToggle.row);
+
     scWrap.appendChild(scInput);
     scWrap.appendChild(resetBtn);
     scRow.appendChild(scLabel);
     scRow.appendChild(scWrap);
     pop.appendChild(scRow);
     pop.appendChild(scHint);
+    syncShortcutEnabledUi(Boolean(currentSettings.shortcutEnabled));
 
-    pop.appendChild(
-      buildSelectRow(
-        "Output Language",
-        "outputLanguage",
-        [
-          { value: "auto", label: "Auto (Follow Draft)" },
-          { value: "id", label: "Indonesian" },
-          { value: "en", label: "English" },
-        ],
-        statusEl
-      )
+    pop.appendChild(buildSectionHeading("Enhancement", false));
+    const langSelect = buildSelectRow(
+      "Output Language",
+      "outputLanguage",
+      [
+        { value: "auto", label: "Auto (Follow Draft)" },
+        { value: "id", label: "Indonesian" },
+        { value: "en", label: "English" },
+      ],
+      statusEl
     );
-    pop.appendChild(
-      buildSelectRow(
-        "Detail Level",
-        "detailLevel",
-        [
-          { value: "concise", label: "Concise" },
-          { value: "balanced", label: "Balanced" },
-          { value: "comprehensive", label: "Comprehensive" },
-        ],
-        statusEl
-      )
+    pop.appendChild(langSelect.row);
+    const detailSelect = buildSelectRow(
+      "Detail Level",
+      "detailLevel",
+      [
+        { value: "concise", label: "Concise" },
+        { value: "balanced", label: "Balanced" },
+        { value: "comprehensive", label: "Comprehensive" },
+      ],
+      statusEl
     );
-    pop.appendChild(
-      buildSelectRow(
-        "Preset Mode",
-        "preset",
-        [
-          { value: "general", label: "General" },
-          { value: "debug", label: "Bug Fix / Debug" },
-          { value: "refactor", label: "Refactor" },
-          { value: "architecture", label: "Architecture / Plan" },
-        ],
-        statusEl
-      )
+    pop.appendChild(detailSelect.row);
+    const presetSelect = buildSelectRow(
+      "Preset Mode",
+      "preset",
+      [
+        { value: "general", label: "General" },
+        { value: "debug", label: "Bug Fix / Debug" },
+        { value: "refactor", label: "Refactor" },
+        { value: "architecture", label: "Architecture / Plan" },
+      ],
+      statusEl
     );
+    pop.appendChild(presetSelect.row);
+
     const customRow = document.createElement("div");
     customRow.style.marginBottom = "8px";
+    const customLabelRow = document.createElement("div");
+    customLabelRow.className = "agy-sp-label-row";
     const customLabel = document.createElement("label");
     customLabel.setAttribute("for", "agy-sp-customInstructions");
     customLabel.textContent = "Custom Instructions";
-    const customInput = document.createElement("input");
+    const customMeta = document.createElement("span");
+    customMeta.className = "agy-sp-label-meta";
+    const customCount = document.createElement("span");
+    const customClearBtn = document.createElement("button");
+    customClearBtn.type = "button";
+    customClearBtn.className = "agy-sp-clear-link";
+    customClearBtn.textContent = "Clear";
+    customMeta.appendChild(customCount);
+    customMeta.appendChild(customClearBtn);
+    customLabelRow.appendChild(customLabel);
+    customLabelRow.appendChild(customMeta);
+
+    const customInput = document.createElement("textarea");
     customInput.id = "agy-sp-customInstructions";
-    customInput.type = "text";
+    customInput.rows = 2;
     customInput.maxLength = 400;
     customInput.placeholder = "Optional extra style or focus...";
-    customInput.className = "agy-sp-text-input";
+    customInput.className = "agy-sp-textarea";
     customInput.value = currentSettings.customInstructions || "";
-    customInput.addEventListener("change", () => {
+
+    const updateCustomMeta = () => {
+      const len = customInput.value.length;
+      customCount.textContent = `${len}/400`;
+      customClearBtn.style.display = len > 0 ? "inline" : "none";
+    };
+    updateCustomMeta();
+
+    let customDebounceTimer = null;
+    let lastSavedCustom = (currentSettings.customInstructions || "").trim().slice(0, 400);
+    const flushCustomInstructions = () => {
+      clearTimeout(customDebounceTimer);
+      customDebounceTimer = null;
       const val = customInput.value.trim().slice(0, 400);
-      currentSettings.customInstructions = val;
-      customInput.value = val;
-      saveSettingsPatch({ customInstructions: val }, statusEl);
+      if (val !== lastSavedCustom) {
+        lastSavedCustom = val;
+        currentSettings.customInstructions = val;
+        customInput.value = val;
+        updateCustomMeta();
+        saveSettingsPatch({ customInstructions: val }, statusEl);
+      }
+    };
+    activePopoverFlush = flushCustomInstructions;
+
+    customInput.addEventListener("input", () => {
+      updateCustomMeta();
+      clearTimeout(customDebounceTimer);
+      customDebounceTimer = setTimeout(flushCustomInstructions, 500);
     });
-    customRow.appendChild(customLabel);
+    customInput.addEventListener("blur", flushCustomInstructions);
+    customClearBtn.addEventListener("click", () => {
+      customInput.value = "";
+      updateCustomMeta();
+      flushCustomInstructions();
+    });
+
+    customRow.appendChild(customLabelRow);
     customRow.appendChild(customInput);
     pop.appendChild(customRow);
-    pop.appendChild(buildCheckboxRow("Workspace Context", "includeWorkspaceContext", statusEl));
-    pop.appendChild(buildCheckboxRow("Chat History Context", "includeConversationContext", statusEl));
-    pop.appendChild(buildCheckboxRow("Status Toast", "showToast", statusEl));
+
+    pop.appendChild(buildSectionHeading("Context & Feedback", false));
+    const wsToggle = buildCheckboxRow("Workspace Context", "includeWorkspaceContext", statusEl);
+    const ctxToggle = buildCheckboxRow("Chat History Context", "includeConversationContext", statusEl);
+    const toastToggle = buildCheckboxRow("Status Toast", "showToast", statusEl);
+    pop.appendChild(wsToggle.row);
+    pop.appendChild(ctxToggle.row);
+    pop.appendChild(toastToggle.row);
+
+    activePopoverSync = () => {
+      shortcutToggle.input.checked = Boolean(currentSettings.shortcutEnabled);
+      syncShortcutEnabledUi(Boolean(currentSettings.shortcutEnabled));
+      if (!isRecordingShortcut) {
+        scInput.value = currentSettings.shortcut || DEFAULT_UI_SETTINGS.shortcut;
+      }
+      langSelect.select.value = currentSettings.outputLanguage || "auto";
+      detailSelect.select.value = currentSettings.detailLevel || "balanced";
+      presetSelect.select.value = currentSettings.preset || "general";
+      if (document.activeElement !== customInput) {
+        const nextCustom = currentSettings.customInstructions || "";
+        customInput.value = nextCustom;
+        lastSavedCustom = nextCustom.trim().slice(0, 400);
+        updateCustomMeta();
+      }
+      wsToggle.input.checked = Boolean(currentSettings.includeWorkspaceContext);
+      ctxToggle.input.checked = Boolean(currentSettings.includeConversationContext);
+      toastToggle.input.checked = Boolean(currentSettings.showToast);
+    };
 
     const footer = document.createElement("div");
     footer.className = "agy-sp-footer";
     const openVsBtn = document.createElement("button");
     openVsBtn.type = "button";
     openVsBtn.className = "agy-sp-mini-btn";
-    openVsBtn.textContent = "Open VS Code Settings…";
+    openVsBtn.textContent = "VS Code Settings…";
     openVsBtn.addEventListener("click", async () => {
       try {
         const cfg = await loadConfig(false);
@@ -1227,13 +1517,28 @@
         // ignore
       }
     });
+    const footerRight = document.createElement("div");
+    footerRight.className = "agy-sp-footer-right";
+    if (lastSnapshot && lastSnapshot.inputEl && lastSnapshot.inputEl.isConnected) {
+      const undoLastBtn = document.createElement("button");
+      undoLastBtn.type = "button";
+      undoLastBtn.className = "agy-sp-mini-btn";
+      undoLastBtn.textContent = "Undo Last";
+      undoLastBtn.addEventListener("click", async () => {
+        const snap = lastSnapshot;
+        closeSettingsPopover();
+        await restoreSnapshot(snap, anchorBtn);
+      });
+      footerRight.appendChild(undoLastBtn);
+    }
     const closeBtn = document.createElement("button");
     closeBtn.type = "button";
     closeBtn.className = "agy-sp-mini-btn";
     closeBtn.textContent = "Close";
     closeBtn.addEventListener("click", closeSettingsPopover);
+    footerRight.appendChild(closeBtn);
     footer.appendChild(openVsBtn);
-    footer.appendChild(closeBtn);
+    footer.appendChild(footerRight);
     pop.appendChild(footer);
 
     const creditEl = document.createElement("div");
@@ -1251,8 +1556,8 @@
     document.body.appendChild(pop);
     const rect = anchorBtn.getBoundingClientRect();
     const popRect = pop.getBoundingClientRect();
-    const topPos = Math.max(12, rect.top - popRect.height - 8);
-    const rightPos = Math.max(12, window.innerWidth - rect.right);
+    const topPos = Math.max(12, Math.min(window.innerHeight - popRect.height - 12, rect.top - popRect.height - 8));
+    const rightPos = Math.max(12, Math.min(window.innerWidth - popRect.width - 12, window.innerWidth - rect.right));
     pop.style.top = `${topPos}px`;
     pop.style.right = `${rightPos}px`;
     activePopoverEl = pop;
@@ -1409,6 +1714,10 @@
     closeSettingsPopover();
   });
 
+  window.addEventListener("resize", () => {
+    if (activePopoverEl) closeSettingsPopover();
+  });
+
   if (window.location.protocol.startsWith("http") && typeof EventSource === "function") {
     try {
       const es = new EventSource("/__enhancer/events");
@@ -1417,6 +1726,7 @@
           const parsed = JSON.parse(evt.data || "{}");
           currentSettings = { ...DEFAULT_UI_SETTINGS, ...parsed };
           refreshAllTooltips();
+          if (typeof activePopoverSync === "function") activePopoverSync();
         } catch {
           // ignore
         }

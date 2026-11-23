@@ -72,13 +72,13 @@ test("patchAgyExtensionContent patches both exact and renamed minified signature
   assert.equal(resRenamed.content.endsWith(")(urlVar);this.renderWebviewHtml(x,y,urlVar,z)}}"), true);
 });
 
-test("legacy iframe hooks migrate in place and use the original URL until a signing token is available", () => {
+test("iframe hooks migrate and use the original URL until a compatible proxy is ready", async () => {
   const anchor = "renderIframe(a,b,c){var d=this.buildIframeUrl(b,c);";
   const original = `class View{${anchor}return d;}}`;
   const fresh = ext.patchAgyExtensionContent(original).content;
-  const setSignature = fresh.match(/x\.searchParams\.set\("__agy_sig"[^;]+;/)[0];
-  const legacyUnsigned = fresh.replace("cfg.port&&cfg.token", "cfg.port").replace(setSignature, "");
-  const legacySigned = fresh.replace("cfg.port&&cfg.token", "cfg.port").replace(setSignature, `if(cfg.token){${setSignature}}`);
+  const legacyHook = '/*AGY_ENHANCER_IFRAME_HOOK*/d=((u)=>{try{if(u){return u}}catch{}return u})(d);';
+  const legacyUnsigned = original.replace(anchor, anchor + legacyHook);
+  const legacySigned = legacyUnsigned.replace("if(u){return u}", 'if(u){return u+"?__agy_sig=test"}');
 
   for (const legacy of [legacyUnsigned, legacySigned]) {
     const result = ext.patchAgyExtensionContent(legacy);
@@ -89,19 +89,37 @@ test("legacy iframe hooks migrate in place and use the original URL until a sign
 
   const hubUrl = "http://127.0.0.1:40397/?extensionView=true#session";
   const config = { port: 47831, token: "" };
+  let live = null;
+  let probes = 0;
   const view = vm.runInNewContext(`new (${fresh})()`, {
     __dirname,
     URL,
+    AbortSignal,
+    fetch: async (url, options) => {
+      probes++;
+      assert.equal(url, "http://127.0.0.1:47831/__enhancer/config.json");
+      assert.equal(options.redirect, "error");
+      if (!live) throw new Error("Proxy unavailable");
+      return { ok: true, json: async () => live };
+    },
     require: (id) => id === "fs" ? { readFileSync: () => JSON.stringify(config) } : require(id),
   });
   view.buildIframeUrl = () => hubUrl;
-  assert.equal(view.renderIframe(), hubUrl);
+  assert.equal(await view.renderIframe(), hubUrl);
+  assert.equal(probes, 0);
   config.token = "test-activation-token";
-  const signed = new URL(view.renderIframe());
+  assert.equal(await view.renderIframe(), hubUrl);
+  live = { token: config.token };
+  assert.equal(await view.renderIframe(), hubUrl);
+  live = { supportsSignedIframe: true, token: "previous-extension-host" };
+  assert.equal(await view.renderIframe(), hubUrl);
+  live.token = config.token;
+  const signed = new URL(await view.renderIframe());
   assert.equal(signed.port, String(config.port));
   assert.equal(signed.searchParams.get("__agy_hub"), "40397");
   assert.equal(signed.searchParams.get("__agy_sig"), ext.signHubPort(40397, config.token));
   assert.equal(signed.hash, "#session");
+  assert.equal(probes, 4);
 });
 
 test("buildEnhancePrompt anchors workspace and conversation context while preserving chip tokens", () => {
@@ -237,7 +255,7 @@ test("ensureIdeHookInstalled patches workbench HTML and syncs product.json check
     fs.mkdirSync(path.dirname(nativeJs), { recursive: true });
     const nativeOriginal = "class X{renderIframe(a,b,c){var d=this.buildIframeUrl(b,c);return d;}}";
     const nativeExpected = ext.patchAgyExtensionContent(nativeOriginal).content;
-    const nativeLegacy = nativeExpected.replace("cfg.port&&cfg.token", "cfg.port");
+    const nativeLegacy = nativeOriginal.replace("return d;", "/*AGY_ENHANCER_IFRAME_HOOK*/d=((u)=>{try{if(u){return u}}catch{}return u})(d);return d;");
     fs.writeFileSync(nativeJs, nativeLegacy);
     fs.writeFileSync(`${nativeJs}.enhancer.bak`, nativeOriginal);
 
@@ -507,6 +525,7 @@ test("createEnhancerServer enforces HTTP/SSE/WebSocket security, 413 limits, and
     const cfgRes = await reqJson("/__enhancer/config.json");
     assert.equal(cfgRes.status, 200);
     assert.equal(JSON.parse(cfgRes.body).token, token);
+    assert.equal(JSON.parse(cfgRes.body).supportsSignedIframe, true);
 
     const badSet = await reqJson("/__enhancer/settings", {
       method: "POST",

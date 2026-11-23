@@ -538,10 +538,12 @@ function runEnhanceCli({ draft, context, model, cwd, settings, signal, logger })
 
 function buildIframeHookSnippet(varName) {
   return (
-    `${IFRAME_HOOK_MARKER}${varName}=((u)=>{try{` +
+    `${IFRAME_HOOK_MARKER}${varName}=await (async(u)=>{try{` +
     `const p=require("path").join(__dirname,"..","..","..","out","vs","code","electron-browser","workbench","${HOOK_CONFIG_NAME}");` +
     `const cfg=JSON.parse(require("fs").readFileSync(p,"utf8"));` +
-    `if(cfg&&cfg.port&&cfg.token&&/^http:\\/\\/127\\.0\\.0\\.1:(\\d+)/.test(u)){` +
+    `if(cfg&&Number.isInteger(cfg.port)&&cfg.port>0&&cfg.port<65536&&cfg.token&&/^http:\\/\\/127\\.0\\.0\\.1:(\\d+)/.test(u)){` +
+    `const response=await fetch("http://127.0.0.1:"+cfg.port+"/__enhancer/config.json",{signal:AbortSignal.timeout(250),redirect:"error"});` +
+    `if(!response.ok)return u;const live=await response.json();if(!live.supportsSignedIframe||live.token!==cfg.token)return u;` +
     `const x=new URL(u);const hp=x.port;x.searchParams.set("__agy_hub",hp);` +
     `x.searchParams.set("__agy_sig",require("crypto").createHmac("sha256",String(cfg.token)).update(String(hp)).digest("hex").slice(0,16));` +
     `x.port=String(cfg.port);return x.toString()` +
@@ -550,7 +552,7 @@ function buildIframeHookSnippet(varName) {
 }
 
 function patchAgyExtensionContent(content) {
-  const match = content?.match(/renderIframe\([^)]*\)\{\s*(var|let|const)\s+([a-zA-Z0-9_$]+)\s*=\s*this\.buildIframeUrl\([^;]+\);/);
+  const match = content?.match(/(?:async\s+)?renderIframe\([^)]*\)\{\s*(var|let|const)\s+([a-zA-Z0-9_$]+)\s*=\s*this\.buildIframeUrl\([^;]+\);/);
   if (!match) return { changed: false, content };
 
   const [anchor, declaration, urlVar] = match;
@@ -558,17 +560,21 @@ function patchAgyExtensionContent(content) {
   let hookEnd = hookStart;
   const markerAt = content.indexOf(IFRAME_HOOK_MARKER);
   if (markerAt !== -1) {
-    if (markerAt !== hookStart || !content.startsWith(`${IFRAME_HOOK_MARKER}${urlVar}=((u)=>{try{`, hookStart)) {
+    const prefix = `${IFRAME_HOOK_MARKER}${urlVar}=`;
+    const knownPrefix = content.startsWith(`${prefix}((u)=>{try{`, hookStart) ||
+      content.startsWith(`${prefix}await (async(u)=>{try{`, hookStart);
+    if (markerAt !== hookStart || !knownPrefix) {
       return { changed: false, content };
     }
-    // Both earlier hook formats end with this invocation of the original URL variable.
+    // All supported hook formats end with this invocation of the original URL variable.
     const suffix = `}}catch{}return u})(${urlVar});`;
     const endAt = content.indexOf(suffix, hookStart);
     if (endAt === -1) return { changed: false, content };
     hookEnd = endAt + suffix.length;
   }
 
-  const writableAnchor = declaration === "const" ? anchor.replace(/\bconst(?=\s)/, "let") : anchor;
+  let writableAnchor = declaration === "const" ? anchor.replace(/\bconst(?=\s)/, "let") : anchor;
+  if (!writableAnchor.startsWith("async")) writableAnchor = `async ${writableAnchor}`;
   const hook = buildIframeHookSnippet(urlVar);
   if (anchor === writableAnchor && content.slice(hookStart, hookEnd) === hook) {
     return { changed: false, content };
@@ -1281,7 +1287,7 @@ function createEnhancerServer({
         "Cache-Control": "no-store",
         "Cross-Origin-Resource-Policy": "same-origin",
       });
-      res.end(JSON.stringify({ port: serverPort, token, settings: resolveSettings(), meta: publicMeta }));
+      res.end(JSON.stringify({ port: serverPort, token, supportsSignedIframe: true, settings: resolveSettings(), meta: publicMeta }));
       return;
     }
 

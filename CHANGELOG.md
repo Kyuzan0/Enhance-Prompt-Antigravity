@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.4] - 2026-11-23
+
+### Fixed
+- Keep the native Agents view connected directly to the hub when Prompt Enhancer is uninstalled, the proxy is still starting, or a Marketplace downgrade replaces it with a proxy that lacks signed iframe support.
+
+## [1.4.3] - 2026-11-23
+
+### Improved
+- Aligned Quick Settings (`⚙`) right-column controls (`Shortcut + Reset`, `Output Language`, `Detail Level`, `Preset Mode`) to a uniform `158px` width and `26px` height, added section dividers, modern accessible toggle switches, and viewport-safe `max-height` scrolling.
+- Upgraded `Custom Instructions` to a 2-row `<textarea>` with live `N/400` counter, `Clear` action, debounced auto-save, and flush on popover close.
+- Fixed status indicator timer overlap & error coloring, added disabled visual state on Shortcut controls when disabled, platform-aware macOS hint, `Undo Last` footer action, live SSE popover sync, toast hover-pause for `Undo`, and red hover indicator + `aria-busy` on the spinning `✦` cancel button.
+
 ## [1.4.2] - 2026-11-23
 
 ### Fixed
@@ -76,7 +88,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial release of Antigravity IDE Prompt Enhancer with in-chat **✦ Enhance Prompt** button, loopback reverse proxy, multi-window `__agy_hub` routing, Lexical `@mention`/chip preservation, and strict tool-deny `agy -p` execution.
 
-[Unreleased]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.4.2...HEAD
+[Unreleased]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.4.4...HEAD
+[1.4.4]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.4.3...v1.4.4
+[1.4.3]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.4.2...v1.4.3
 [1.4.2]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.4.1...v1.4.2
 [1.4.1]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.3.0...v1.4.0

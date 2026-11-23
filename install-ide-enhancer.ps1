@@ -392,17 +392,20 @@ if ($agyExtJs -and (Test-Path -LiteralPath $agyExtJs)) {
     $extContent = [System.IO.File]::ReadAllText($agyExtJs, [System.Text.UTF8Encoding]::new($false))
     if ($extContent.Length -gt 0 -and $extContent[0] -eq [char]0xFEFF) { $extContent = $extContent.Substring(1) }
 
-    $target = [regex]::Match($extContent, 'renderIframe\([^)]*\)\{\s*(var|let|const)\s+([a-zA-Z0-9_$]+)\s*=\s*this\.buildIframeUrl\([^;]+\);')
+    $target = [regex]::Match($extContent, '(?:async\s+)?renderIframe\([^)]*\)\{\s*(var|let|const)\s+([a-zA-Z0-9_$]+)\s*=\s*this\.buildIframeUrl\([^;]+\);')
     if ($target.Success) {
         $urlVar = $target.Groups[2].Value
         $hookStart = $target.Index + $target.Length
         $hookEnd = $hookStart
         $markerAt = $extContent.IndexOf($marker, [System.StringComparison]::Ordinal)
         if ($markerAt -ne -1) {
-            $prefix = $marker + $urlVar + '=((u)=>{try{'
+            $legacyPrefix = $marker + $urlVar + '=((u)=>{try{'
+            $currentPrefix = $marker + $urlVar + '=await (async(u)=>{try{'
+            $knownPrefix = ($extContent.IndexOf($legacyPrefix, $hookStart, [System.StringComparison]::Ordinal) -eq $hookStart) -or
+                ($extContent.IndexOf($currentPrefix, $hookStart, [System.StringComparison]::Ordinal) -eq $hookStart)
             $suffix = '}}catch{}return u})(' + $urlVar + ');'
             $endAt = $extContent.IndexOf($suffix, $hookStart, [System.StringComparison]::Ordinal)
-            if ($markerAt -eq $hookStart -and $extContent.IndexOf($prefix, $hookStart, [System.StringComparison]::Ordinal) -eq $hookStart -and $endAt -ge 0) {
+            if ($markerAt -eq $hookStart -and $knownPrefix -and $endAt -ge 0) {
                 $hookEnd = $endAt + $suffix.Length
             }
         }
@@ -414,7 +417,10 @@ if ($agyExtJs -and (Test-Path -LiteralPath $agyExtJs)) {
             if ($target.Groups[1].Value -eq 'const') {
                 $anchor = $anchor -creplace '\bconst(?=\s)', 'let'
             }
-            $hookExpr = $marker + $urlVar + '=((u)=>{try{const p=require("path").join(__dirname,"..","..","..","out","vs","code","electron-browser","workbench","enhance-ide-hook-config.json");const cfg=JSON.parse(require("fs").readFileSync(p,"utf8"));if(cfg&&cfg.port&&cfg.token&&/^http:\/\/127\.0\.0\.1:(\d+)/.test(u)){const x=new URL(u);const hp=x.port;x.searchParams.set("__agy_hub",hp);x.searchParams.set("__agy_sig",require("crypto").createHmac("sha256",String(cfg.token)).update(String(hp)).digest("hex").slice(0,16));x.port=String(cfg.port);return x.toString()}}catch{}return u})(' + $urlVar + ');'
+            if (-not $anchor.StartsWith('async', [System.StringComparison]::Ordinal)) {
+                $anchor = 'async ' + $anchor
+            }
+            $hookExpr = $marker + $urlVar + '=await (async(u)=>{try{const p=require("path").join(__dirname,"..","..","..","out","vs","code","electron-browser","workbench","enhance-ide-hook-config.json");const cfg=JSON.parse(require("fs").readFileSync(p,"utf8"));if(cfg&&Number.isInteger(cfg.port)&&cfg.port>0&&cfg.port<65536&&cfg.token&&/^http:\/\/127\.0\.0\.1:(\d+)/.test(u)){const response=await fetch("http://127.0.0.1:"+cfg.port+"/__enhancer/config.json",{signal:AbortSignal.timeout(250),redirect:"error"});if(!response.ok)return u;const live=await response.json();if(!live.supportsSignedIframe||live.token!==cfg.token)return u;const x=new URL(u);const hp=x.port;x.searchParams.set("__agy_hub",hp);x.searchParams.set("__agy_sig",require("crypto").createHmac("sha256",String(cfg.token)).update(String(hp)).digest("hex").slice(0,16));x.port=String(cfg.port);return x.toString()}}catch{}return u})(' + $urlVar + ');'
             $remainder = $extContent.Substring($hookEnd)
             $nextContent = $extContent.Substring(0, $target.Index) + $anchor + $hookExpr + $remainder
             if ($nextContent -ceq $extContent) {
