@@ -698,5 +698,12 @@ test("package-vsix.mjs builds a clean ZIP archive in build/ excluding dev/test f
   assert.equal(out.includes("extension/scripts/"), false);
   assert.equal(out.includes("ide-extension.test.mjs"), false);
   const magic = fs.readFileSync(vsixPath).subarray(0, 4);
-  assert.deepEqual(magic, Buffer.from([0x50, 0x4b, 0x03, 0x04]));
+  assert.equal(magic.equals(Buffer.from([0x50, 0x4b, 0x03, 0x04])) || Buffer.compare(magic, Buffer.from([0x50, 0x4b, 0x03, 0x04])) === 0, true);
+});
+
+test("package.json keybinding respects shortcutEnabled config setting", () => {
+  const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, "package.json"), "utf8"));
+  const kb = (pkg.contributes?.keybindings || []).find((k) => k.command === "antigravityEnhancer.enhancePrompt");
+  assert.ok(kb, "enhancePrompt keybinding should exist");
+  assert.equal(kb.when, "config.antigravityPromptEnhancer.shortcutEnabled");
 });

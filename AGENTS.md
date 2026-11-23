@@ -18,6 +18,9 @@ Setiap perubahan fungsional pada `extension.js`, `enhance-ide-hook.js`, `install
 3. **Rebuild `.vsix` Bersih ke Folder `build/`:**
    - Seluruh artefak hasil build `.vsix` **wajib** ditempatkan di dalam folder `build/` (`build/ag-ide-prompt-enhancer-<version>.vsix` via `scripts/package-vsix.mjs`), bukan di root proyek.
    - Pastikan versi lama (di `build/` maupun sisa di root) sudah dibersihkan.
+4. **Jangan Instalasi Lokal / Release Manual Tanpa Diminta:**
+   - **Jangan** menjalankan `install-ide-enhancer.sh` / `install-ide-enhancer.ps1`, membuat tag Git manual, atau mem-publish `.vsix` secara manual kecuali diminta secara eksplisit oleh pengguna.
+   - Alur rilis, pembuatan tag `v<version>`, GitHub Releases, dan publikasi ke Open VSX (OIDC Trusted Publishing) sudah ditangani otomatis oleh GitHub Actions (`.github/workflows/release.yml`) setiap kali `main` di-push dengan versi `package.json` baru.
 
 ## 3. Aturan Git Hook (`.githooks/commit-msg`)
 - Aktifkan di clone baru dengan `npm run hooks:install` (`git config core.hooksPath .githooks`).

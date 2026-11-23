@@ -168,6 +168,41 @@
         padding-top: 0;
         border-top: none;
       }
+      .agy-sp-section-toggle {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        width: 100%;
+        background: none;
+        border: none;
+        border-top: 1px solid rgba(128,128,128,0.16);
+        color: inherit;
+        font-family: inherit;
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        opacity: 0.65;
+        margin: 10px 0 6px 0;
+        padding: 8px 0 0 0;
+        cursor: pointer;
+        text-align: left;
+      }
+      .agy-sp-section-toggle:hover {
+        opacity: 0.95;
+      }
+      .agy-sp-chevron {
+        font-size: 11px;
+        line-height: 1;
+        transition: transform 0.15s ease;
+        display: inline-block;
+      }
+      .agy-sp-section-toggle[aria-expanded="true"] .agy-sp-chevron {
+        transform: rotate(90deg);
+      }
+      .agy-sp-section-body {
+        display: block;
+      }
       .agy-sp-credit {
         margin-top: 8px;
         font-size: 10px;
@@ -1199,6 +1234,37 @@
     return h;
   }
 
+  function buildCollapsibleSection(title, bodyEl, defaultOpen, onToggle) {
+    const wrap = document.createElement("div");
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "agy-sp-section-toggle";
+    let expanded = Boolean(defaultOpen);
+    btn.setAttribute("aria-expanded", expanded ? "true" : "false");
+
+    const titleSpan = document.createElement("span");
+    titleSpan.textContent = title;
+    const chevron = document.createElement("span");
+    chevron.className = "agy-sp-chevron";
+    chevron.textContent = "▸";
+    btn.appendChild(titleSpan);
+    btn.appendChild(chevron);
+
+    bodyEl.className = "agy-sp-section-body";
+    bodyEl.style.display = expanded ? "block" : "none";
+
+    btn.addEventListener("click", () => {
+      expanded = !expanded;
+      btn.setAttribute("aria-expanded", expanded ? "true" : "false");
+      bodyEl.style.display = expanded ? "block" : "none";
+      if (typeof onToggle === "function") onToggle(expanded);
+    });
+
+    wrap.appendChild(btn);
+    wrap.appendChild(bodyEl);
+    return wrap;
+  }
+
   function buildCheckboxRow(labelText, key, statusEl, onToggle) {
     const row = document.createElement("div");
     row.className = "agy-sp-row";
@@ -1368,7 +1434,16 @@
     pop.appendChild(scHint);
     syncShortcutEnabledUi(Boolean(currentSettings.shortcutEnabled));
 
-    pop.appendChild(buildSectionHeading("Enhancement", false));
+    const repositionPopover = () => {
+      const rect = anchorBtn.getBoundingClientRect();
+      const popRect = pop.getBoundingClientRect();
+      const topPos = Math.max(12, Math.min(window.innerHeight - popRect.height - 12, rect.top - popRect.height - 8));
+      const rightPos = Math.max(12, Math.min(window.innerWidth - popRect.width - 12, window.innerWidth - rect.right));
+      pop.style.top = `${topPos}px`;
+      pop.style.right = `${rightPos}px`;
+    };
+
+    const enhancementBody = document.createElement("div");
     const langSelect = buildSelectRow(
       "Output Language",
       "outputLanguage",
@@ -1379,7 +1454,7 @@
       ],
       statusEl
     );
-    pop.appendChild(langSelect.row);
+    enhancementBody.appendChild(langSelect.row);
     const detailSelect = buildSelectRow(
       "Detail Level",
       "detailLevel",
@@ -1390,7 +1465,7 @@
       ],
       statusEl
     );
-    pop.appendChild(detailSelect.row);
+    enhancementBody.appendChild(detailSelect.row);
     const presetSelect = buildSelectRow(
       "Preset Mode",
       "preset",
@@ -1402,7 +1477,7 @@
       ],
       statusEl
     );
-    pop.appendChild(presetSelect.row);
+    enhancementBody.appendChild(presetSelect.row);
 
     const customRow = document.createElement("div");
     customRow.style.marginBottom = "8px";
@@ -1451,10 +1526,11 @@
       statusEl,
       (enabled) => {
         syncCustomEnabledUi(enabled);
+        repositionPopover();
         if (enabled) customInput.focus();
       }
     );
-    pop.appendChild(customToggle.row);
+    enhancementBody.appendChild(customToggle.row);
     syncCustomEnabledUi(Boolean(currentSettings.customInstructionsEnabled));
 
     let customDebounceTimer = null;
@@ -1488,15 +1564,17 @@
     customBody.appendChild(customLabelRow);
     customBody.appendChild(customInput);
     customRow.appendChild(customBody);
-    pop.appendChild(customRow);
+    enhancementBody.appendChild(customRow);
+    pop.appendChild(buildCollapsibleSection("Enhancement", enhancementBody, false, repositionPopover));
 
-    pop.appendChild(buildSectionHeading("Context & Feedback", false));
+    const contextBody = document.createElement("div");
     const wsToggle = buildCheckboxRow("Workspace Context", "includeWorkspaceContext", statusEl);
     const ctxToggle = buildCheckboxRow("Chat History Context", "includeConversationContext", statusEl);
     const toastToggle = buildCheckboxRow("Status Toast", "showToast", statusEl);
-    pop.appendChild(wsToggle.row);
-    pop.appendChild(ctxToggle.row);
-    pop.appendChild(toastToggle.row);
+    contextBody.appendChild(wsToggle.row);
+    contextBody.appendChild(ctxToggle.row);
+    contextBody.appendChild(toastToggle.row);
+    pop.appendChild(buildCollapsibleSection("Context & Feedback", contextBody, false, repositionPopover));
 
     activePopoverSync = () => {
       shortcutToggle.input.checked = Boolean(currentSettings.shortcutEnabled);
@@ -1578,12 +1656,7 @@
     pop.appendChild(creditEl);
 
     document.body.appendChild(pop);
-    const rect = anchorBtn.getBoundingClientRect();
-    const popRect = pop.getBoundingClientRect();
-    const topPos = Math.max(12, Math.min(window.innerHeight - popRect.height - 12, rect.top - popRect.height - 8));
-    const rightPos = Math.max(12, Math.min(window.innerWidth - popRect.width - 12, window.innerWidth - rect.right));
-    pop.style.top = `${topPos}px`;
-    pop.style.right = `${rightPos}px`;
+    repositionPopover();
     activePopoverEl = pop;
   }
 
