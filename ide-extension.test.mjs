@@ -884,6 +884,9 @@ test("buildElevatedRepairInvocation generates safe elevation commands for linux,
   });
   assert.equal(winInv.command, "powershell.exe");
   assert.equal(winInv.args.includes("-Command"), true);
+  assert.equal(winInv.args.includes("-WindowStyle"), true);
+  assert.equal(winInv.args.includes("Hidden"), true);
+  assert.equal(winInv.args.join(" ").includes("-WindowStyle Hidden"), true);
   assert.equal(winInv.args.join(" ").includes("-Verb RunAs"), true);
 });
 

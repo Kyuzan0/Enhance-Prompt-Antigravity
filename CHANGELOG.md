@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-11-24
+
+### Fixed
+- Switched `runEnhanceCli` to `spawn(..., { shell: false, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] })` and added `-WindowStyle Hidden` + `windowsHide: true` to Windows elevated PowerShell invocations to prevent console/PowerShell windows from flashing on Windows.
+
 ## [1.5.0] - 2026-11-24
 
 ### Added
@@ -138,7 +143,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial release of Antigravity IDE Prompt Enhancer with in-chat **✦ Enhance Prompt** button, loopback reverse proxy, multi-window `__agy_hub` routing, Lexical `@mention`/chip preservation, and strict tool-deny `agy -p` execution.
 
-[Unreleased]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.5.1...HEAD
+[1.5.1]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.5.0...v1.5.1
 [1.5.0]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.4.9...v1.5.0
 [1.4.9]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.4.8...v1.4.9
 [1.4.8]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.4.7...v1.4.8

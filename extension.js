@@ -10,7 +10,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
 const crypto = require("node:crypto");
-const { execFile } = require("node:child_process");
+const { execFile, spawn } = require("node:child_process");
 
 const HOOK_SCRIPT_NAME = "enhance-ide-hook.js";
 const HOOK_CONFIG_NAME = "enhance-ide-hook-config.json";
@@ -500,45 +500,134 @@ function runEnhanceCli({ draft, context, model, cwd, settings, signal, logger })
       }
 
       const args = attemptModel ? [...baseArgs, "--model", attemptModel] : [...baseArgs];
-      execFile(
-        agyBin,
-        args,
-        {
-          cwd: workDir,
-          env: cliEnv,
-          timeout: resolveEnhanceTimeoutMs(),
-          maxBuffer: 2 * 1024 * 1024,
-          windowsHide: true,
-          signal,
-        },
-        (err, stdout, stderr) => {
-          if (err) {
-            if ((signal && signal.aborted) || err.name === "AbortError" || err.code === "ABORT_ERR") {
-              const abortErr = new Error("Enhancement cancelled");
-              abortErr.name = "AbortError";
-              abortErr.code = "ABORT_ERR";
-              return reject(abortErr);
-            }
-            const msg = (stderr || stdout || err.message || "agy -p failed").trim();
-            const logLine = `[PromptEnhancer] agy -p failed (model=${attemptModel || "default"}): ${msg}`;
-            if (typeof logger === "function") logger(logLine);
-            else console.error(logLine);
-            if (allowFallback && attemptModel && !err.killed && isModelNotFoundError(msg)) {
-              return execAttempt("", false);
-            }
-            return reject(new Error(msg.slice(0, 260)));
-          }
-          const enhanced = cleanOutput(stdout);
-          if (!enhanced) {
-            return reject(new Error("Empty response from model"));
-          }
-          resolve({
-            enhanced,
-            model: attemptModel || "default",
-            durationMs: Date.now() - start,
-          });
+      const timeoutMs = resolveEnhanceTimeoutMs();
+      const maxBuffer = 2 * 1024 * 1024;
+      let settled = false;
+      let timedOut = false;
+      let bufferExceeded = false;
+      const stdoutChunks = [];
+      const stderrChunks = [];
+      let totalBytes = 0;
+
+      const child = spawn(agyBin, args, {
+        cwd: workDir,
+        env: cliEnv,
+        shell: false,
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+
+      let timer = null;
+      const onAbort = () => {
+        try {
+          child.kill();
+        } catch {
+          // ignore
         }
-      );
+        if (settled) return;
+        settled = true;
+        cleanup();
+        const abortErr = new Error("Enhancement cancelled");
+        abortErr.name = "AbortError";
+        abortErr.code = "ABORT_ERR";
+        reject(abortErr);
+      };
+
+      const cleanup = () => {
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
+        if (signal && typeof signal.removeEventListener === "function") {
+          signal.removeEventListener("abort", onAbort);
+        }
+      };
+
+      if (signal && typeof signal.addEventListener === "function") {
+        signal.addEventListener("abort", onAbort, { once: true });
+      }
+
+      timer = setTimeout(() => {
+        timedOut = true;
+        try {
+          child.kill();
+        } catch {
+          // ignore
+        }
+      }, timeoutMs);
+
+      const collectChunk = (targetChunks, chunk) => {
+        if (bufferExceeded) return;
+        totalBytes += chunk.length;
+        if (totalBytes > maxBuffer) {
+          bufferExceeded = true;
+          try {
+            child.kill();
+          } catch {
+            // ignore
+          }
+          return;
+        }
+        targetChunks.push(chunk);
+      };
+
+      if (child.stdout) child.stdout.on("data", (c) => collectChunk(stdoutChunks, c));
+      if (child.stderr) child.stderr.on("data", (c) => collectChunk(stderrChunks, c));
+
+      child.on("error", (err) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        if (signal && signal.aborted) {
+          const abortErr = new Error("Enhancement cancelled");
+          abortErr.name = "AbortError";
+          abortErr.code = "ABORT_ERR";
+          return reject(abortErr);
+        }
+        const msg = (err?.message || "agy -p failed").trim();
+        const logLine = `[PromptEnhancer] agy -p spawn error (model=${attemptModel || "default"}): ${msg}`;
+        if (typeof logger === "function") logger(logLine);
+        else console.error(logLine);
+        reject(new Error(msg.slice(0, 260)));
+      });
+
+      child.on("close", (code, sig) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        if (signal && signal.aborted) {
+          const abortErr = new Error("Enhancement cancelled");
+          abortErr.name = "AbortError";
+          abortErr.code = "ABORT_ERR";
+          return reject(abortErr);
+        }
+        const stdout = Buffer.concat(stdoutChunks).toString("utf8");
+        const stderr = Buffer.concat(stderrChunks).toString("utf8");
+        if (timedOut || bufferExceeded || code !== 0 || sig) {
+          const fallbackReason = timedOut
+            ? `agy -p timed out after ${timeoutMs}ms`
+            : bufferExceeded
+              ? "agy -p output exceeded buffer limit"
+              : `agy -p exited with code ${code}${sig ? ` (${sig})` : ""}`;
+          const msg = (stderr || stdout || fallbackReason).trim();
+          const logLine = `[PromptEnhancer] agy -p failed (model=${attemptModel || "default"}): ${msg}`;
+          if (typeof logger === "function") logger(logLine);
+          else console.error(logLine);
+          if (allowFallback && attemptModel && !timedOut && !bufferExceeded && isModelNotFoundError(msg)) {
+            return execAttempt("", false);
+          }
+          return reject(new Error(msg.slice(0, 260)));
+        }
+        const enhanced = cleanOutput(stdout);
+        if (!enhanced) {
+          return reject(new Error("Empty response from model"));
+        }
+        resolve({
+          enhanced,
+          model: attemptModel || "default",
+          durationMs: Date.now() - start,
+        });
+      });
     };
 
     execAttempt(resolvedModel, Boolean(resolvedModel));
@@ -894,11 +983,11 @@ function buildElevatedRepairInvocation({
 
   if (platform === "win32") {
     const argList = scriptArgs.map(psSingleQuote).join(", ");
-    const psCmd = `$env:ELECTRON_RUN_AS_NODE='1'; $p=Start-Process -FilePath ${psSingleQuote(runtime)} -ArgumentList @(${argList}) -Verb RunAs -Wait -PassThru; exit $p.ExitCode`;
+    const psCmd = `$env:ELECTRON_RUN_AS_NODE='1'; $p=Start-Process -FilePath ${psSingleQuote(runtime)} -ArgumentList @(${argList}) -Verb RunAs -WindowStyle Hidden -Wait -PassThru; exit $p.ExitCode`;
     return {
       command: "powershell.exe",
-      args: ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", psCmd],
-      shellCommand: `powershell -NoProfile -Command ${psSingleQuote(psCmd)}`,
+      args: ["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-Command", psCmd],
+      shellCommand: `powershell -NoProfile -WindowStyle Hidden -Command ${psSingleQuote(psCmd)}`,
     };
   }
 
@@ -943,7 +1032,7 @@ function runElevatedRepair({ extDir, appRoot, enableAutoRepair = false, logger }
     execFile(
       inv.command,
       inv.args,
-      { timeout: 60000, maxBuffer: 2 * 1024 * 1024 },
+      { timeout: 60000, maxBuffer: 2 * 1024 * 1024, windowsHide: true },
       (err, stdout, stderr) => {
         if (err) {
           const stderrText = String(stderr || "").trim();
