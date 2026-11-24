@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * SemVer release automation for ag-ide-prompt-enhancer.
- * Usage: node scripts/release.mjs <patch|minor|major|X.Y.Z> [--dry-run] [--no-build] [--tag] [--from-git]
+ * Usage: node scripts/release.mjs <patch|minor|major|X.Y.Z> [--dry-run] [--no-verify] [--no-build] [--tag] [--from-git]
  */
 
 import fs from 'node:fs';
@@ -115,12 +115,13 @@ function main() {
   const argv = process.argv.slice(2);
   const target = argv.find((a) => !a.startsWith('-'));
   const dryRun = argv.includes('--dry-run');
+  const noVerify = argv.includes('--no-verify');
   const noBuild = argv.includes('--no-build');
   const withTag = argv.includes('--tag');
   const fromGit = argv.includes('--from-git');
 
   if (!target) {
-    console.error('Usage: node scripts/release.mjs <patch|minor|major|X.Y.Z> [--dry-run] [--no-build] [--tag] [--from-git]');
+    console.error('Usage: node scripts/release.mjs <patch|minor|major|X.Y.Z> [--dry-run] [--no-verify] [--no-build] [--tag] [--from-git]');
     process.exit(1);
   }
 
@@ -146,14 +147,18 @@ function main() {
   fs.writeFileSync(changelogPath, nextChangelog, 'utf8');
   console.log(`[release] Bumped package.json & CHANGELOG.md: ${prevVersion} -> ${nextVersion}`);
 
-  // Verify syntax, unit tests, and contracts
-  runNode(['--check', 'extension.js']);
-  runNode(['--check', 'enhance-ide-hook.js']);
-  runNode(['--check', 'scripts/package-vsix.mjs']);
-  runNode(['--check', 'scripts/release.mjs']);
-  runNode(['--check', 'scripts/auto-bump-on-commit.mjs']);
-  runNode(['--test', 'ide-extension.test.mjs']);
-  runNode(['verify-contracts.mjs']);
+  if (!noVerify) {
+    // Verify syntax, version lockstep, unit tests, and contracts
+    runNode(['--check', 'extension.js']);
+    runNode(['--check', 'enhance-ide-hook.js']);
+    runNode(['--check', 'scripts/package-vsix.mjs']);
+    runNode(['--check', 'scripts/release.mjs']);
+    runNode(['--check', 'scripts/auto-bump-on-commit.mjs']);
+    runNode(['--check', 'scripts/verify-version.mjs']);
+    runNode(['scripts/verify-version.mjs']);
+    runNode(['--test', 'ide-extension.test.mjs']);
+    runNode(['verify-contracts.mjs']);
+  }
 
   if (!noBuild) {
     runNode(['scripts/package-vsix.mjs']);

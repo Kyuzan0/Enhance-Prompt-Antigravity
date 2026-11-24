@@ -72,15 +72,18 @@ test("patchAgyExtensionContent patches both exact and renamed minified signature
   assert.equal(resRenamed.content.endsWith(")(urlVar);this.renderWebviewHtml(x,y,urlVar,z)}}"), true);
 });
 
-test("iframe hooks migrate and use the original URL until a compatible proxy is ready", async () => {
+test("iframe hooks migrate, recover from startup race, and fall back safely when proxy is incompatible", async () => {
   const anchor = "renderIframe(a,b,c){var d=this.buildIframeUrl(b,c);";
   const original = `class View{${anchor}return d;}}`;
   const fresh = ext.patchAgyExtensionContent(original).content;
   const legacyHook = '/*AGY_ENHANCER_IFRAME_HOOK*/d=((u)=>{try{if(u){return u}}catch{}return u})(d);';
   const legacyUnsigned = original.replace(anchor, anchor + legacyHook);
   const legacySigned = legacyUnsigned.replace("if(u){return u}", 'if(u){return u+"?__agy_sig=test"}');
+  const v148Hook =
+    '/*AGY_ENHANCER_IFRAME_HOOK*/d=await (async(u)=>{try{const p="x";if(u){return u}}catch{}return u})(d);';
+  const legacyV148 = original.replace(anchor, anchor + v148Hook);
 
-  for (const legacy of [legacyUnsigned, legacySigned]) {
+  for (const legacy of [legacyUnsigned, legacySigned, legacyV148]) {
     const result = ext.patchAgyExtensionContent(legacy);
     assert.equal(result.changed, true);
     assert.equal(result.originalContent, original);
@@ -88,38 +91,46 @@ test("iframe hooks migrate and use the original URL until a compatible proxy is 
   }
 
   const hubUrl = "http://127.0.0.1:40397/?extensionView=true#session";
-  const config = { port: 47831, token: "" };
+  const config = { port: 47831, token: "stale-token" };
   let live = null;
   let probes = 0;
+  let delayTick = 0;
   const view = vm.runInNewContext(`new (${fresh})()`, {
     __dirname,
     URL,
     AbortSignal,
+    setTimeout: (fn) => {
+      delayTick++;
+      if (delayTick === 2) {
+        config.token = "test-activation-token";
+        live = { supportsSignedIframe: true, token: config.token };
+      }
+      fn();
+    },
     fetch: async (url, options) => {
       probes++;
       assert.equal(url, "http://127.0.0.1:47831/__enhancer/config.json");
       assert.equal(options.redirect, "error");
-      if (!live) throw new Error("Proxy unavailable");
+      if (!live) throw new Error("ECONNREFUSED");
       return { ok: true, json: async () => live };
     },
     require: (id) => id === "fs" ? { readFileSync: () => JSON.stringify(config) } : require(id),
   });
   view.buildIframeUrl = () => hubUrl;
-  assert.equal(await view.renderIframe(), hubUrl);
-  assert.equal(probes, 0);
-  config.token = "test-activation-token";
-  assert.equal(await view.renderIframe(), hubUrl);
-  live = { token: config.token };
-  assert.equal(await view.renderIframe(), hubUrl);
-  live = { supportsSignedIframe: true, token: "previous-extension-host" };
-  assert.equal(await view.renderIframe(), hubUrl);
-  live.token = config.token;
+
+  // Startup race: initial fetch throws ECONNREFUSED, then extension activates and hook succeeds.
   const signed = new URL(await view.renderIframe());
   assert.equal(signed.port, String(config.port));
   assert.equal(signed.searchParams.get("__agy_hub"), "40397");
   assert.equal(signed.searchParams.get("__agy_sig"), ext.signHubPort(40397, config.token));
   assert.equal(signed.hash, "#session");
-  assert.equal(probes, 4);
+  assert.equal(probes, 3);
+
+  // Incompatible proxy (missing supportsSignedIframe) returns original URL immediately without retrying.
+  live = { token: config.token };
+  const beforeProbes = probes;
+  assert.equal(await view.renderIframe(), hubUrl);
+  assert.equal(probes, beforeProbes + 1);
 });
 
 test("buildEnhancePrompt anchors workspace and conversation context while preserving chip tokens", () => {
@@ -292,7 +303,33 @@ test("ensureIdeHookInstalled patches workbench HTML and syncs product.json check
     const second = ext.ensureIdeHookInstalled({ extensionPath: __dirname }, 47831, "tok", tmpApp);
     assert.equal(second.patched, false);
     assert.equal(second.checksumsUpdated, false);
+    assert.equal(second.permissionDenied, false);
   } finally {
+    fs.rmSync(tmpApp, { recursive: true, force: true });
+  }
+});
+
+test("ensureIdeHookInstalled reports permissionDenied cleanly when workbench files are read-only", () => {
+  if (process.platform === "win32" || (typeof process.getuid === "function" && process.getuid() === 0)) {
+    return;
+  }
+  const tmpApp = fs.mkdtempSync(path.join(os.tmpdir(), "agy-ide-eacces-test-"));
+  const wbDir = path.join(tmpApp, "out", "vs", "code", "electron-browser", "workbench");
+  try {
+    fs.mkdirSync(wbDir, { recursive: true });
+    fs.writeFileSync(path.join(wbDir, "workbench.html"), "<html></html>", "utf8");
+    fs.chmodSync(wbDir, 0o555);
+    const res = ext.ensureIdeHookInstalled({ extensionPath: __dirname }, 47831, "tok", tmpApp);
+    assert.equal(res.patched, false);
+    assert.equal(res.permissionDenied, true);
+    assert.equal(typeof res.reason, "string");
+    assert.equal(res.reason.includes("EACCES"), true);
+  } finally {
+    try {
+      fs.chmodSync(wbDir, 0o755);
+    } catch {
+      // ignore
+    }
     fs.rmSync(tmpApp, { recursive: true, force: true });
   }
 });
@@ -684,14 +721,19 @@ test("enhance-ide-hook.js exported helpers preserve nested Lexical chips and mat
   assert.equal(hook.detectDisplayedModel(mockBox), "DeepSeek R1 (High)");
 });
 
-test("package-vsix.mjs builds a clean ZIP archive in build/ excluding dev/test files and .vscodeignore", () => {
+test("package-vsix.mjs builds a clean ZIP archive and SHA256SUMS.txt in build/ excluding dev/test files and .vscodeignore", () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, "package.json"), "utf8"));
-  const vsixPath = path.join(__dirname, "build", `${pkg.name}-${pkg.version}.vsix`);
+  const vsixName = `${pkg.name}-${pkg.version}.vsix`;
+  const vsixPath = path.join(__dirname, "build", vsixName);
+  const sumsPath = path.join(__dirname, "build", "SHA256SUMS.txt");
   const out = execFileSync(process.execPath, [path.join(__dirname, "scripts", "package-vsix.mjs")], {
     cwd: __dirname,
     encoding: "utf8",
   });
   assert.equal(fs.existsSync(vsixPath), true);
+  assert.equal(fs.existsSync(sumsPath), true);
+  const sumsText = fs.readFileSync(sumsPath, "utf8").trim();
+  assert.match(sumsText, new RegExp(`^[a-f0-9]{64}  ${vsixName.replace(/\./g, "\\.")}$`));
   assert.equal(out.includes("extension/assets/icon.png"), true);
   assert.equal(out.includes("extension/.vscodeignore"), false);
   assert.equal(out.includes("extension/build/"), false);
@@ -699,6 +741,14 @@ test("package-vsix.mjs builds a clean ZIP archive in build/ excluding dev/test f
   assert.equal(out.includes("ide-extension.test.mjs"), false);
   const magic = fs.readFileSync(vsixPath).subarray(0, 4);
   assert.equal(magic.equals(Buffer.from([0x50, 0x4b, 0x03, 0x04])) || Buffer.compare(magic, Buffer.from([0x50, 0x4b, 0x03, 0x04])) === 0, true);
+});
+
+test("verify-version.mjs validates package.json metadata and CHANGELOG.md sync", () => {
+  const out = execFileSync(process.execPath, [path.join(__dirname, "scripts", "verify-version.mjs")], {
+    cwd: __dirname,
+    encoding: "utf8",
+  });
+  assert.equal(out.includes("[verify:version] OK:"), true);
 });
 
 test("package.json keybinding respects shortcutEnabled config setting", () => {

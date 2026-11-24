@@ -4,6 +4,10 @@ on:
   push:
     branches:
       - main
+    paths-ignore:
+      - 'docs/**'
+      - 'README.md'
+      - 'AGENTS.md'
   workflow_dispatch:
 
 concurrency:
@@ -12,6 +16,7 @@ concurrency:
 
 jobs:
   build-and-release:
+    name: Verify, Tag & GitHub Release
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -21,6 +26,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Verify scripts, version, tests, and contracts
+        run: npm run verify
 
       - name: Check if package.json version is already tagged
         id: check_version
@@ -36,16 +49,6 @@ jobs:
             echo "should_release=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Setup Node.js
-        if: steps.check_version.outputs.should_release == 'true'
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Verify syntax, unit tests, and contracts
-        if: steps.check_version.outputs.should_release == 'true'
-        run: npm run verify
-
       - name: Build VSIX package
         if: steps.check_version.outputs.should_release == 'true'
         run: npm run package
@@ -55,8 +58,30 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: vsix-package
-          path: build/ag-ide-prompt-enhancer-*.vsix
+          retention-days: 7
+          path: |
+            build/ag-ide-prompt-enhancer-*.vsix
+            build/SHA256SUMS.txt
           if-no-files-found: error
+
+      - name: Extract release notes from CHANGELOG.md
+        if: steps.check_version.outputs.should_release == 'true'
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const version = require("./package.json").version;
+            const md = fs.readFileSync("CHANGELOG.md", "utf8").replace(/\r\n/g, "\n");
+            const header = "## [" + version + "]";
+            const start = md.indexOf(header);
+            if (start !== -1) {
+              const afterHeader = md.indexOf("\n", start) + 1;
+              const nextMatch = md.slice(afterHeader).match(/\n## \[/);
+              const end = nextMatch ? afterHeader + nextMatch.index : md.length;
+              fs.writeFileSync("release-notes.md", md.slice(afterHeader, end).trim() + "\n", "utf8");
+            } else {
+              fs.writeFileSync("release-notes.md", "Release v" + version + "\n", "utf8");
+            }
+          '
 
       - name: Create GitHub Release & Tag
         if: steps.check_version.outputs.should_release == 'true'
@@ -64,10 +89,13 @@ jobs:
         with:
           tag_name: ${{ steps.check_version.outputs.tag }}
           name: Release ${{ steps.check_version.outputs.tag }}
-          files: build/ag-ide-prompt-enhancer-*.vsix
-          generate_release_notes: true
+          body_path: release-notes.md
+          files: |
+            build/ag-ide-prompt-enhancer-*.vsix
+            build/SHA256SUMS.txt
 
   publish-openvsx:
+    name: Publish to Open VSX
     needs: build-and-release
     if: needs.build-and-release.outputs.should_release == 'true'
     runs-on: ubuntu-latest
@@ -84,12 +112,13 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: 22
 
       - name: Publish to Open VSX via Trusted Publishing (OIDC)
         run: npx --yes ovsx@latest publish build/ag-ide-prompt-enhancer-*.vsix
 
   publish-vs-marketplace:
+    name: Publish to VS Marketplace
     needs: build-and-release
     if: needs.build-and-release.outputs.should_release == 'true'
     runs-on: ubuntu-latest
@@ -105,7 +134,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: 22
 
       - name: Publish to Visual Studio Marketplace
         env:

@@ -280,7 +280,7 @@ function main() {
 
   if (!keepOld) {
     for (const file of fs.readdirSync(buildDir)) {
-      if (file.startsWith(`${pkg.name}-`) && file.endsWith('.vsix') && file !== outName) {
+      if ((file.startsWith(`${pkg.name}-`) && file.endsWith('.vsix') && file !== outName) || file === 'SHA256SUMS.txt') {
         fs.rmSync(path.join(buildDir, file), { force: true });
         console.log(`[package-vsix] Removed stale artifact: build/${file}`);
       }
@@ -331,8 +331,10 @@ function main() {
   fs.writeFileSync(outPath, zipBuf);
 
   const sha256 = crypto.createHash('sha256').update(zipBuf).digest('hex');
+  fs.writeFileSync(path.join(buildDir, 'SHA256SUMS.txt'), `${sha256}  ${outName}\n`, 'utf8');
   console.log(`[package-vsix] Built build/${outName} (${zipBuf.length} bytes, ${zipEntries.length} entries)`);
   console.log(`[package-vsix] SHA-256: ${sha256}`);
+  console.log('[package-vsix] Wrote build/SHA256SUMS.txt');
   for (const e of zipEntries) {
     console.log(`  - ${e.name}`);
   }

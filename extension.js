@@ -545,15 +545,18 @@ function runEnhanceCli({ draft, context, model, cwd, settings, signal, logger })
 function buildIframeHookSnippet(varName) {
   return (
     `${IFRAME_HOOK_MARKER}${varName}=await (async(u)=>{try{` +
-    `const p=require("path").join(__dirname,"..","..","..","out","vs","code","electron-browser","workbench","${HOOK_CONFIG_NAME}");` +
-    `const cfg=JSON.parse(require("fs").readFileSync(p,"utf8"));` +
-    `if(cfg&&Number.isInteger(cfg.port)&&cfg.port>0&&cfg.port<65536&&cfg.token&&/^http:\\/\\/127\\.0\\.0\\.1:(\\d+)/.test(u)){` +
-    `const response=await fetch("http://127.0.0.1:"+cfg.port+"/__enhancer/config.json",{signal:AbortSignal.timeout(250),redirect:"error"});` +
-    `if(!response.ok)return u;const live=await response.json();if(!live.supportsSignedIframe||live.token!==cfg.token)return u;` +
+    `if(!/^http:\\/\\/127\\.0\\.0\\.1:(\\d+)/.test(u))return u;` +
+    `const fs=require("fs"),p=require("path").join(__dirname,"..","..","..","out","vs","code","electron-browser","workbench","${HOOK_CONFIG_NAME}");` +
+    `for(const dl=Date.now()+2400;;){` +
+    `let cfg=null;try{cfg=JSON.parse(fs.readFileSync(p,"utf8"));}catch(e){if(e&&e.code==="ENOENT")return u;}` +
+    `if(cfg&&Number.isInteger(cfg.port)&&cfg.port>0&&cfg.port<65536&&cfg.token){` +
+    `try{const response=await fetch("http://127.0.0.1:"+cfg.port+"/__enhancer/config.json",{signal:AbortSignal.timeout(250),redirect:"error"});` +
+    `if(response.ok){const live=await response.json();if(live&&!live.supportsSignedIframe)return u;if(live&&live.supportsSignedIframe&&live.token===cfg.token){` +
     `const x=new URL(u);const hp=x.port;x.searchParams.set("__agy_hub",hp);` +
     `x.searchParams.set("__agy_sig",require("crypto").createHmac("sha256",String(cfg.token)).update(String(hp)).digest("hex").slice(0,16));` +
-    `x.port=String(cfg.port);return x.toString()` +
-    `}}catch{}return u})(${varName});`
+    `x.port=String(cfg.port);return x.toString()}}}catch{}}` +
+    `if(Date.now()>=dl)break;await new Promise((r)=>setTimeout(r,150))}` +
+    `}catch{}return u})(${varName});`
   );
 }
 
@@ -683,22 +686,33 @@ function patchAgyExtensionIframe(appRoot) {
 
 function ensureIdeHookInstalled(context, port, token, appRootOverride = "", options = {}) {
   const appRoot = appRootOverride || (vscode && vscode.env && vscode.env.appRoot) || "";
-  if (!appRoot) return { patched: false, hookUpdated: false, checksumsUpdated: false, configWritten: false, reason: "appRoot unavailable" };
+  if (!appRoot) {
+    return { patched: false, hookUpdated: false, checksumsUpdated: false, configWritten: false, permissionDenied: false, reason: "appRoot unavailable" };
+  }
   const wbDir = path.join(appRoot, "out", "vs", "code", "electron-browser", "workbench");
-  if (!fs.existsSync(wbDir)) return { patched: false, hookUpdated: false, checksumsUpdated: false, configWritten: false, reason: "workbench dir not found" };
+  if (!fs.existsSync(wbDir)) {
+    return { patched: false, hookUpdated: false, checksumsUpdated: false, configWritten: false, permissionDenied: false, reason: "workbench dir not found" };
+  }
+
+  const errors = [];
+  let permissionDenied = false;
+  const recordWriteError = (label, err) => {
+    const code = err && err.code ? String(err.code) : "";
+    if (code === "EACCES" || code === "EPERM") permissionDenied = true;
+    errors.push(`${label} (${code || err?.message || "error"})`);
+  };
 
   const srcHook = path.join(context.extensionPath, HOOK_SCRIPT_NAME);
   const dstHook = path.join(wbDir, HOOK_SCRIPT_NAME);
   const srcBytes = fs.readFileSync(srcHook, "utf8");
   let hookUpdated = false;
-  let writeError = "";
   try {
     if (!fs.existsSync(dstHook) || fs.readFileSync(dstHook, "utf8") !== srcBytes) {
       fs.writeFileSync(dstHook, srcBytes, "utf8");
       hookUpdated = true;
     }
   } catch (err) {
-    writeError = `hook write failed (${err?.code || err?.message || "error"})`;
+    recordWriteError("hook write failed", err);
   }
 
   let configWritten = false;
@@ -708,9 +722,7 @@ function ensureIdeHookInstalled(context, port, token, appRootOverride = "", opti
       fs.writeFileSync(cfgPath, JSON.stringify({ port, token }), "utf8");
       configWritten = true;
     } catch (err) {
-      writeError = writeError
-        ? `${writeError}; config write failed (${err?.code || err?.message || "error"})`
-        : `config write failed (${err?.code || err?.message || "error"})`;
+      recordWriteError("config write failed", err);
     }
   }
 
@@ -727,13 +739,17 @@ function ensureIdeHookInstalled(context, port, token, appRootOverride = "", opti
     if (html.includes(HOOK_SCRIPT_NAME)) continue;
 
     const bakPath = `${htmlPath}.enhancer.bak`;
-    // Target HTML does not contain our hook yet, so save exact current version as clean backup.
-    fs.writeFileSync(bakPath, html, "utf8");
-    const nextHtml = html.includes(t.anchor)
-      ? html.replace(t.anchor, `${t.anchor}\n${SCRIPT_TAG}`)
-      : html.replace("</html>", `${SCRIPT_TAG}\n</html>`);
-    fs.writeFileSync(htmlPath, nextHtml, "utf8");
-    htmlPatched = true;
+    try {
+      // Target HTML does not contain our hook yet, so save exact current version as clean backup.
+      fs.writeFileSync(bakPath, html, "utf8");
+      const nextHtml = html.includes(t.anchor)
+        ? html.replace(t.anchor, `${t.anchor}\n${SCRIPT_TAG}`)
+        : html.replace("</html>", `${SCRIPT_TAG}\n</html>`);
+      fs.writeFileSync(htmlPath, nextHtml, "utf8");
+      htmlPatched = true;
+    } catch (err) {
+      recordWriteError(`${t.file} patch failed`, err);
+    }
   }
 
   let checksumsUpdated = false;
@@ -741,12 +757,24 @@ function ensureIdeHookInstalled(context, port, token, appRootOverride = "", opti
     const cs = syncProductJsonChecksums(appRoot);
     checksumsUpdated = Boolean(cs && cs.updated);
   } catch (err) {
-    console.error("[PromptEnhancer] Failed to sync product.json checksums:", err);
+    recordWriteError("product.json checksum sync failed", err);
   }
 
-  const iframePatched = patchAgyExtensionIframe(appRoot);
+  let iframePatched = false;
+  try {
+    iframePatched = patchAgyExtensionIframe(appRoot);
+  } catch (err) {
+    recordWriteError("iframe hook patch failed", err);
+  }
 
-  return { patched: htmlPatched || iframePatched, hookUpdated, checksumsUpdated, configWritten, reason: writeError || undefined };
+  return {
+    patched: htmlPatched || iframePatched,
+    hookUpdated,
+    checksumsUpdated,
+    configWritten,
+    permissionDenied,
+    reason: errors.length ? errors.join("; ") : undefined,
+  };
 }
 
 function parsePortCookie(cookieHeader) {
@@ -1570,7 +1598,18 @@ function activate(context) {
       const status = ensureIdeHookInstalled(context, boundPort, token, "", { skipConfigOverwrite });
       lastHookStatus = status;
       if (status.reason) log(`Hook status note: ${status.reason}`);
-      if (status.patched) {
+      if (status.permissionDenied) {
+        const repairHint = process.platform === "win32"
+          ? "Run install-ide-enhancer.ps1 as Administrator to restore the Enhance button after IDE update."
+          : "Run install-ide-enhancer.sh with sudo to restore the Enhance button after IDE update.";
+        vscode.window
+          .showWarningMessage(`Antigravity IDE Prompt Enhancer: IDE folder is read-only. ${repairHint}`, "Show Diagnostics")
+          .then((choice) => {
+            if (choice === "Show Diagnostics") {
+              vscode.commands.executeCommand("antigravityEnhancer.diagnostics");
+            }
+          });
+      } else if (status.patched) {
         vscode.window
           .showInformationMessage(
             "Antigravity IDE Prompt Enhancer hook restored after IDE update. Reload window to show the Enhance button.",
@@ -1583,7 +1622,9 @@ function activate(context) {
           });
       }
     } catch (err) {
-      log(`Failed to ensure IDE hook: ${err?.message || err}`);
+      const msg = err?.message || String(err);
+      lastHookStatus = { patched: false, permissionDenied: err?.code === "EACCES" || err?.code === "EPERM", reason: msg };
+      log(`Failed to ensure IDE hook: ${msg}`);
     }
   };
 

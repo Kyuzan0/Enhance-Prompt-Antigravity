@@ -3,8 +3,10 @@
  * Automatic SemVer + CHANGELOG.md + VSIX builder invoked by .githooks/commit-msg.
  * Env toggles:
  *   SKIP_AUTO_RELEASE=1     Skip version/changelog bump completely
- *   SKIP_AUTO_BUILD=1       Bump version & changelog without rebuilding .vsix
  *   AUTO_RELEASE_DRY_RUN=1  Print planned bump without modifying files
+ *   SKIP_AUTO_VERIFY=1      Skip post-bump verification checks
+ *   SKIP_AUTO_BUILD=1       Bump version & changelog without rebuilding .vsix
+ *   FORCE_AUTO_RELEASE=1    Bump even if staged files do not touch runtime paths
  */
 
 import fs from 'node:fs';
@@ -81,7 +83,7 @@ function classifyCommit(subject, body, stagedFiles) {
 
   if (isBreaking) return { bump: 'major', section: '### Changed', desc: subject };
 
-  if (touchesRuntime) {
+  if (touchesRuntime || process.env.FORCE_AUTO_RELEASE === '1') {
     return { bump: 'patch', section: '### Changed', desc: subject };
   }
   return null;
@@ -172,6 +174,8 @@ function main() {
       ['--check', 'scripts/package-vsix.mjs'],
       ['--check', 'scripts/release.mjs'],
       ['--check', 'scripts/auto-bump-on-commit.mjs'],
+      ['--check', 'scripts/verify-version.mjs'],
+      ['scripts/verify-version.mjs'],
       ['--test', 'ide-extension.test.mjs'],
       ['verify-contracts.mjs'],
     ]) {

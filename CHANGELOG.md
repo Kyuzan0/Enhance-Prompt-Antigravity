@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.9] - 2026-11-24
+
+### Changed
+- Aligned SemVer verification and release tooling with Dompetku (`scripts/verify-version.mjs`, `check:scripts` & `verify:version` npm scripts, `--no-verify` flag in `scripts/release.mjs`, `FORCE_AUTO_RELEASE` handling in `scripts/auto-bump-on-commit.mjs`, and `build/SHA256SUMS.txt` checksum manifest in `scripts/package-vsix.mjs`).
+- Optimized GitHub Actions CI/CD workflows (PR-scoped `ci.yml` with concurrency cancellation to eliminate duplicate `main` runs, Node 22 runtime, `paths-ignore` for docs-only commits, `CHANGELOG.md` release notes extraction, `SHA256SUMS.txt` release attachment, and 7-day artifact retention).
+
+### Fixed
+- Added bounded startup-race retry (`2.4s`, `150ms` interval) in the `renderIframe` hook (`extension.js` & `install-ide-enhancer.ps1`) so chat iframes wait for the local enhancer proxy to finish activating and rotating its token after IDE startup/updates instead of falling back to the unproxied hub URL.
+- Handled `EACCES`/`EPERM` gracefully across all workbench/iframe patch writes in `ensureIdeHookInstalled` (`permissionDenied: true`) and surfaced an actionable warning notification with a `Show Diagnostics` button when the IDE installation directory is read-only.
+
 ## [1.4.8] - 2026-11-23
 
 ### Fixed
@@ -117,7 +127,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial release of Antigravity IDE Prompt Enhancer with in-chat **✦ Enhance Prompt** button, loopback reverse proxy, multi-window `__agy_hub` routing, Lexical `@mention`/chip preservation, and strict tool-deny `agy -p` execution.
 
-[Unreleased]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.4.8...HEAD
+[Unreleased]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.4.9...HEAD
+[1.4.9]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.4.8...v1.4.9
 [1.4.8]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.4.7...v1.4.8
 [1.4.7]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.4.6...v1.4.7
 [1.4.6]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.4.5...v1.4.6

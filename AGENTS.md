@@ -14,9 +14,9 @@ Setiap perubahan fungsional pada `extension.js`, `enhance-ide-hook.js`, `install
      - `node scripts/release.mjs patch` (bugfix / refactor / optimasi), atau `minor` (fitur baru), atau `major` (*breaking change*).
    - *(Jika `git commit` dijalankan langsung tanpa `release.mjs`, `.githooks/commit-msg` akan otomatis menaikkan versi, mengisi `CHANGELOG.md`, dan membangun `.vsix` berdasarkan pesan Conventional Commit. Gunakan `SKIP_AUTO_RELEASE=1` hanya bila memang ingin melewati bump.)*
 2. **Verifikasi Penuh Sebelum Selesai:**
-   - Jalankan `npm run verify` (atau via Electron Node Linux: `ELECTRON_RUN_AS_NODE=1 /opt/antigravity-ide/antigravity-ide --test ide-extension.test.mjs` dan `verify-contracts.mjs`).
+   - Jalankan `npm run verify` (menjalankan `check`, `verify:version`, unit tests `ide-extension.test.mjs`, dan `verify:contracts`; atau via Electron Node Linux: `ELECTRON_RUN_AS_NODE=1 /opt/antigravity-ide/antigravity-ide --test ide-extension.test.mjs`).
 3. **Rebuild `.vsix` Bersih ke Folder `build/`:**
-   - Seluruh artefak hasil build `.vsix` **wajib** ditempatkan di dalam folder `build/` (`build/ag-ide-prompt-enhancer-<version>.vsix` via `scripts/package-vsix.mjs`), bukan di root proyek.
+   - Seluruh artefak hasil build `.vsix` dan `SHA256SUMS.txt` **wajib** ditempatkan di dalam folder `build/` (`build/ag-ide-prompt-enhancer-<version>.vsix` + `build/SHA256SUMS.txt` via `scripts/package-vsix.mjs`), bukan di root proyek.
    - Pastikan versi lama (di `build/` maupun sisa di root) sudah dibersihkan.
 4. **Jangan Instalasi Lokal / Release Manual Tanpa Diminta:**
    - **Jangan** menjalankan `install-ide-enhancer.sh` / `install-ide-enhancer.ps1`, membuat tag Git manual, atau mem-publish `.vsix` secara manual kecuali diminta secara eksplisit oleh pengguna.
