@@ -2,15 +2,26 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-EXT_ROOT="${ANTIGRAVITY_EXTENSIONS_DIR:-$HOME/.antigravity-ide/extensions}"
+REAL_USER="${SUDO_USER:-$(id -un)}"
+REAL_HOME="$(getent passwd "$REAL_USER" 2>/dev/null | cut -d: -f6 || true)"
+if [[ -z "$REAL_HOME" ]]; then
+  REAL_HOME="$HOME"
+fi
+EXT_ROOT="${ANTIGRAVITY_EXTENSIONS_DIR:-$REAL_HOME/.antigravity-ide/extensions}"
 IDE_APP_ROOT="${ANTIGRAVITY_IDE_APP_ROOT:-}"
 VSIX_PATH=""
 UNINSTALL=0
+HOOK_ONLY=0
+ENABLE_AUTO_REPAIR=0
+DISABLE_AUTO_REPAIR=0
 
 usage() {
   cat <<'EOF'
 Usage: install-ide-enhancer.sh [options]
   --uninstall              Restore backups and remove extension & UI hook
+  --hook-only              Patch IDE UI hook only (keep existing Open VSX extension)
+  --enable-auto-repair     Install systemd.path watcher to auto-repair after IDE updates
+  --disable-auto-repair    Remove systemd.path post-update auto-repair watcher
   --vsix <path|auto>       Install from a .vsix archive (or "auto" to pick local .vsix)
   --ext-root <dir>         Override extensions directory (default: ~/.antigravity-ide/extensions)
   --ide-app-root <dir>     Override Antigravity IDE resources/app directory
@@ -21,6 +32,9 @@ EOF
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --uninstall) UNINSTALL=1; shift ;;
+    --hook-only) HOOK_ONLY=1; shift ;;
+    --enable-auto-repair) ENABLE_AUTO_REPAIR=1; shift ;;
+    --disable-auto-repair) DISABLE_AUTO_REPAIR=1; shift ;;
     --vsix) VSIX_PATH="${2:-}"; shift 2 ;;
     --ext-root) EXT_ROOT="${2:-}"; shift 2 ;;
     --ide-app-root) IDE_APP_ROOT="${2:-}"; shift 2 ;;
@@ -129,7 +143,34 @@ if [[ $UNINSTALL -eq 1 ]]; then
   if [[ -d "$EXT_ROOT" ]]; then
     find "$EXT_ROOT" -maxdepth 1 -type d \( -name "$EXT_ID-*" -o -name "$LEGACY_ID-*" \) -exec rm -rf {} +
   fi
+  if [[ -f "$SCRIPT_DIR/repair-ide-hook.js" ]]; then
+    run_node "$SCRIPT_DIR/repair-ide-hook.js" --disable-auto-repair || true
+  fi
+  rm -f "$REAL_HOME/.antigravity-enhancer/config.json"
   echo "[IDE ENHANCER UNINSTALLED]"
+  exit 0
+fi
+
+if [[ $HOOK_ONLY -eq 1 ]]; then
+  if [[ -z "$APP_ROOT" || ! -d "$WB_DIR" ]]; then
+    echo "Error: Antigravity IDE workbench directory not found." >&2
+    exit 1
+  fi
+  HOOK_EXT_DIR="$(ls -dt "$EXT_ROOT"/kyuzan0.ag-ide-prompt-enhancer-* 2>/dev/null | head -n1 || true)"
+  if [[ -z "$HOOK_EXT_DIR" || ! -f "$HOOK_EXT_DIR/extension.js" ]]; then
+    HOOK_EXT_DIR="$SCRIPT_DIR"
+  fi
+  REPAIR_SCRIPT="$HOOK_EXT_DIR/repair-ide-hook.js"
+  if [[ ! -f "$REPAIR_SCRIPT" ]]; then
+    REPAIR_SCRIPT="$SCRIPT_DIR/repair-ide-hook.js"
+  fi
+  REPAIR_ARGS=(--ext-dir "$HOOK_EXT_DIR" --app-root "$APP_ROOT")
+  if [[ $ENABLE_AUTO_REPAIR -eq 1 ]]; then
+    REPAIR_ARGS+=(--enable-auto-repair)
+  elif [[ $DISABLE_AUTO_REPAIR -eq 1 ]]; then
+    REPAIR_ARGS+=(--disable-auto-repair)
+  fi
+  run_node "$REPAIR_SCRIPT" "${REPAIR_ARGS[@]}"
   exit 0
 fi
 
@@ -149,7 +190,7 @@ if [[ -n "$RESOLVED_VSIX" ]]; then
 else
   STAGE_EXT="$TMP_STAGE/extension"
   mkdir -p "$STAGE_EXT"
-  for f in package.json extension.js enhance-ide-hook.js LICENSE README.md CHANGELOG.md; do
+  for f in package.json extension.js enhance-ide-hook.js repair-ide-hook.js LICENSE README.md CHANGELOG.md; do
     if [[ -f "$SCRIPT_DIR/$f" ]]; then cp -f "$SCRIPT_DIR/$f" "$STAGE_EXT/$f"; fi
   done
 fi
@@ -188,15 +229,17 @@ run_node -e "
 " "$EXT_JSON" "$EXT_ID" "$LEGACY_ID" "$EXT_VER" "$DST_DIR" "$EXT_FOLDER"
 
 if [[ -n "$APP_ROOT" && -d "$WB_DIR" ]]; then
-  run_node -e "
-    const fs=require('fs'), path=require('path');
-    const ext=require(process.argv[1]);
-    const dstDir=process.argv[2], appRoot=process.argv[3], wbDir=process.argv[4];
-    const res=ext.ensureIdeHookInstalled({extensionPath:dstDir}, 47831, '', appRoot);
-    const cfgPath=path.join(wbDir,'enhance-ide-hook-config.json');
-    if(fs.existsSync(cfgPath)) fs.chmodSync(cfgPath, 0o666);
-    console.log('Workbench hook status:', JSON.stringify(res));
-  " "$DST_DIR/extension.js" "$DST_DIR" "$APP_ROOT" "$WB_DIR"
+  REPAIR_SCRIPT="$DST_DIR/repair-ide-hook.js"
+  if [[ ! -f "$REPAIR_SCRIPT" ]]; then
+    REPAIR_SCRIPT="$SCRIPT_DIR/repair-ide-hook.js"
+  fi
+  REPAIR_ARGS=(--ext-dir "$DST_DIR" --app-root "$APP_ROOT")
+  if [[ $ENABLE_AUTO_REPAIR -eq 1 ]]; then
+    REPAIR_ARGS+=(--enable-auto-repair)
+  elif [[ $DISABLE_AUTO_REPAIR -eq 1 ]]; then
+    REPAIR_ARGS+=(--disable-auto-repair)
+  fi
+  run_node "$REPAIR_SCRIPT" "${REPAIR_ARGS[@]}"
 elif [[ -n "$APP_ROOT" ]]; then
   echo "Warning: workbench directory not found at $WB_DIR" >&2
 fi

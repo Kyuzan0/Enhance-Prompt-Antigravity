@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-11-24
+
+### Added
+- Interactive **Yes/No admin permission modal** (`Yes (Enable & Auto-Repair)` / `Yes (This Time Only)` / `Cancel`) when the IDE installation directory is read-only (e.g., `/opt/antigravity-ide` on Linux), bundled with `repair-ide-hook.js` so Open VSX users can elevate via `pkexec` / `osascript` / UAC without a terminal or repository clone.
+- Persistent **Status Bar retry button** (`Enhance Setup (Retry)`) and `Retry` action toast when admin elevation is deferred or cancelled, plus `Copy sudo Command` fallback.
+- Optional Linux `systemd.path` post-update auto-repair watcher (`antigravity-enhancer-repair.path` + `.service` staged under `/usr/local/lib/antigravity-enhancer/`) that automatically re-patches the IDE hook after Antigravity IDE updates.
+- `--hook-only`, `--enable-auto-repair`, `--disable-auto-repair`, and `$SUDO_USER`-aware home resolution in `install-ide-enhancer.sh`.
+
+### Changed
+- Moved primary runtime `{ port, token }` config to `~/.antigravity-enhancer/config.json` (`chmod 0600`) with legacy workbench fallback in `buildIframeHookSnippet`, eliminating `EACCES` on token rotation and extension updates once the IDE hook is installed.
+
 ## [1.4.9] - 2026-11-24
 
 ### Changed
@@ -127,7 +138,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial release of Antigravity IDE Prompt Enhancer with in-chat **✦ Enhance Prompt** button, loopback reverse proxy, multi-window `__agy_hub` routing, Lexical `@mention`/chip preservation, and strict tool-deny `agy -p` execution.
 
-[Unreleased]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.4.9...HEAD
+[Unreleased]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.4.9...v1.5.0
 [1.4.9]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.4.8...v1.4.9
 [1.4.8]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.4.7...v1.4.8
 [1.4.7]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.4.6...v1.4.7

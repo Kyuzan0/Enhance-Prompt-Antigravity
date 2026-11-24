@@ -254,6 +254,7 @@ test("cleanOutput strips fences, conversational preambles, and excessive blank l
 
 test("ensureIdeHookInstalled patches workbench HTML and syncs product.json checksums cleanly", () => {
   const tmpApp = fs.mkdtempSync(path.join(os.tmpdir(), "agy-ide-checksum-test-"));
+  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "agy-ide-home-test-"));
   try {
     const wbDir = path.join(tmpApp, "out", "vs", "code", "electron-browser", "workbench");
     fs.mkdirSync(wbDir, { recursive: true });
@@ -284,9 +285,13 @@ test("ensureIdeHookInstalled patches workbench HTML and syncs product.json check
     const pjPath = path.join(tmpApp, "product.json");
     fs.writeFileSync(pjPath, JSON.stringify(productObj, null, "\t") + "\n", "utf8");
 
-    const res = ext.ensureIdeHookInstalled({ extensionPath: __dirname }, 47831, "tok", tmpApp);
+    const res = ext.ensureIdeHookInstalled({ extensionPath: __dirname }, 47831, "tok", tmpApp, { userHomeDir: tmpHome });
     assert.equal(res.patched, true);
     assert.equal(res.checksumsUpdated, true);
+    assert.equal(res.userConfigWritten, true);
+    const userCfgPath = ext.getUserConfigPath(tmpHome);
+    assert.equal(fs.existsSync(userCfgPath), true);
+    assert.deepEqual(JSON.parse(fs.readFileSync(userCfgPath, "utf8")), { port: 47831, token: "tok" });
     assert.equal(fs.readFileSync(nativeJs, "utf8"), nativeExpected);
     assert.equal(fs.readFileSync(`${nativeJs}.enhancer.bak`, "utf8"), nativeOriginal);
 
@@ -300,12 +305,14 @@ test("ensureIdeHookInstalled patches workbench HTML and syncs product.json check
     assert.notEqual(updatedPj.checksums["vs/code/electron-browser/workbench/workbench.html"], origHash1);
 
     // Idempotent on subsequent startup: nothing needs re-patching or re-syncing.
-    const second = ext.ensureIdeHookInstalled({ extensionPath: __dirname }, 47831, "tok", tmpApp);
+    const second = ext.ensureIdeHookInstalled({ extensionPath: __dirname }, 47831, "tok", tmpApp, { userHomeDir: tmpHome });
     assert.equal(second.patched, false);
     assert.equal(second.checksumsUpdated, false);
     assert.equal(second.permissionDenied, false);
+    assert.equal(second.userConfigWritten, true);
   } finally {
     fs.rmSync(tmpApp, { recursive: true, force: true });
+    fs.rmSync(tmpHome, { recursive: true, force: true });
   }
 });
 
@@ -314,14 +321,16 @@ test("ensureIdeHookInstalled reports permissionDenied cleanly when workbench fil
     return;
   }
   const tmpApp = fs.mkdtempSync(path.join(os.tmpdir(), "agy-ide-eacces-test-"));
+  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "agy-ide-eacces-home-"));
   const wbDir = path.join(tmpApp, "out", "vs", "code", "electron-browser", "workbench");
   try {
     fs.mkdirSync(wbDir, { recursive: true });
     fs.writeFileSync(path.join(wbDir, "workbench.html"), "<html></html>", "utf8");
     fs.chmodSync(wbDir, 0o555);
-    const res = ext.ensureIdeHookInstalled({ extensionPath: __dirname }, 47831, "tok", tmpApp);
+    const res = ext.ensureIdeHookInstalled({ extensionPath: __dirname }, 47831, "tok", tmpApp, { userHomeDir: tmpHome });
     assert.equal(res.patched, false);
     assert.equal(res.permissionDenied, true);
+    assert.equal(res.userConfigWritten, true);
     assert.equal(typeof res.reason, "string");
     assert.equal(res.reason.includes("EACCES"), true);
   } finally {
@@ -331,6 +340,36 @@ test("ensureIdeHookInstalled reports permissionDenied cleanly when workbench fil
       // ignore
     }
     fs.rmSync(tmpApp, { recursive: true, force: true });
+    fs.rmSync(tmpHome, { recursive: true, force: true });
+  }
+});
+
+test("ensureIdeHookInstalled succeeds without permissionDenied when already patched on read-only IDE", () => {
+  if (process.platform === "win32" || (typeof process.getuid === "function" && process.getuid() === 0)) {
+    return;
+  }
+  const tmpApp = fs.mkdtempSync(path.join(os.tmpdir(), "agy-ide-ro-patched-"));
+  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "agy-ide-ro-patched-home-"));
+  const wbDir = path.join(tmpApp, "out", "vs", "code", "electron-browser", "workbench");
+  try {
+    fs.mkdirSync(wbDir, { recursive: true });
+    fs.writeFileSync(path.join(wbDir, "workbench.html"), '<script src="./enhance-ide-hook.js" type="module"></script>', "utf8");
+    fs.writeFileSync(path.join(wbDir, "enhance-ide-hook.js"), "// existing hook", "utf8");
+    fs.chmodSync(wbDir, 0o555);
+
+    const res = ext.ensureIdeHookInstalled({ extensionPath: __dirname }, 47831, "fresh-tok", tmpApp, { userHomeDir: tmpHome });
+    assert.equal(res.permissionDenied, false);
+    assert.equal(res.userConfigWritten, true);
+    assert.equal(res.configWritten, true);
+    assert.deepEqual(JSON.parse(fs.readFileSync(ext.getUserConfigPath(tmpHome), "utf8")), { port: 47831, token: "fresh-tok" });
+  } finally {
+    try {
+      fs.chmodSync(wbDir, 0o755);
+    } catch {
+      // ignore
+    }
+    fs.rmSync(tmpApp, { recursive: true, force: true });
+    fs.rmSync(tmpHome, { recursive: true, force: true });
   }
 });
 
@@ -735,6 +774,7 @@ test("package-vsix.mjs builds a clean ZIP archive and SHA256SUMS.txt in build/ e
   const sumsText = fs.readFileSync(sumsPath, "utf8").trim();
   assert.match(sumsText, new RegExp(`^[a-f0-9]{64}  ${vsixName.replace(/\./g, "\\.")}$`));
   assert.equal(out.includes("extension/assets/icon.png"), true);
+  assert.equal(out.includes("extension/repair-ide-hook.js"), true);
   assert.equal(out.includes("extension/.vscodeignore"), false);
   assert.equal(out.includes("extension/build/"), false);
   assert.equal(out.includes("extension/scripts/"), false);
@@ -807,4 +847,109 @@ test("enhance-ide-hook.js syncButtonDisabled, toast overlay visibility, and list
   assert.equal(/function\s+syncButtonDisabled\s*\(/.test(hookSrc), true);
   assert.equal(hookSrc.includes(".agy-toast-pill.visible.has-undo"), true);
   assert.equal(hookSrc.includes("visibility: hidden;"), true);
+});
+
+test("buildElevatedRepairInvocation generates safe elevation commands for linux, darwin, and win32", () => {
+  const linuxInv = ext.buildElevatedRepairInvocation({
+    platform: "linux",
+    execPath: "/opt/antigravity-ide/antigravity-ide",
+    repairScriptPath: "/home/user/.antigravity-ide/extensions/ext/repair-ide-hook.js",
+    extDir: "/home/user/.antigravity-ide/extensions/ext",
+    appRoot: "/opt/antigravity-ide/resources/app",
+    enableAutoRepair: true,
+  });
+  assert.equal(linuxInv.command, "/usr/bin/pkexec");
+  assert.equal(linuxInv.args[0], "/usr/bin/env");
+  assert.equal(linuxInv.args[1], "ELECTRON_RUN_AS_NODE=1");
+  assert.equal(linuxInv.args.includes("--enable-auto-repair"), true);
+  assert.equal(linuxInv.shellCommand.includes("sudo env ELECTRON_RUN_AS_NODE=1"), true);
+
+  const macInv = ext.buildElevatedRepairInvocation({
+    platform: "darwin",
+    execPath: "/Applications/Antigravity IDE.app/Contents/MacOS/Electron",
+    repairScriptPath: "/Users/me/repair-ide-hook.js",
+    extDir: "/Users/me/ext",
+    appRoot: "/Applications/Antigravity IDE.app/Contents/Resources/app",
+  });
+  assert.equal(macInv.command, "/usr/bin/osascript");
+  assert.equal(macInv.args[0], "-e");
+  assert.equal(macInv.args[1].includes("with administrator privileges"), true);
+
+  const winInv = ext.buildElevatedRepairInvocation({
+    platform: "win32",
+    execPath: "C:\\Program Files\\Antigravity\\Antigravity.exe",
+    repairScriptPath: "C:\\Users\\me\\repair-ide-hook.js",
+    extDir: "C:\\Users\\me\\ext",
+    appRoot: "C:\\Program Files\\Antigravity\\resources\\app",
+  });
+  assert.equal(winInv.command, "powershell.exe");
+  assert.equal(winInv.args.includes("-Command"), true);
+  assert.equal(winInv.args.join(" ").includes("-Verb RunAs"), true);
+});
+
+test("repair-ide-hook.js patches IDE hook and stages/cleans systemd auto-repair units safely", () => {
+  const tmpApp = fs.mkdtempSync(path.join(os.tmpdir(), "agy-repair-app-"));
+  const tmpSystemd = fs.mkdtempSync(path.join(os.tmpdir(), "agy-repair-systemd-"));
+  const tmpLib = fs.mkdtempSync(path.join(os.tmpdir(), "agy-repair-lib-"));
+  try {
+    const wbDir = path.join(tmpApp, "out", "vs", "code", "electron-browser", "workbench");
+    fs.mkdirSync(wbDir, { recursive: true });
+    fs.writeFileSync(path.join(wbDir, "workbench.html"), '<!doctype html><html><script src="./workbench.js" type="module"></script></html>', "utf8");
+    const nativeJs = path.join(tmpApp, "extensions", "agy", "vscode", "extension.js");
+    fs.mkdirSync(path.dirname(nativeJs), { recursive: true });
+    fs.writeFileSync(nativeJs, "class X{renderIframe(a,b,c){var d=this.buildIframeUrl(b,c);return d;}}", "utf8");
+
+    const out = execFileSync(
+      process.execPath,
+      [
+        path.join(__dirname, "repair-ide-hook.js"),
+        "--ext-dir",
+        __dirname,
+        "--app-root",
+        tmpApp,
+        "--enable-auto-repair",
+        "--systemd-dir",
+        tmpSystemd,
+        "--install-lib-dir",
+        tmpLib,
+      ],
+      { encoding: "utf8", env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" } }
+    );
+    const parsed = JSON.parse(out.trim());
+    assert.equal(parsed.ok, true);
+    assert.equal(parsed.status.patched, true);
+    assert.equal(parsed.status.userConfigWritten, false);
+    assert.equal(parsed.autoRepairEnabled, true);
+
+    assert.equal(fs.existsSync(path.join(tmpLib, "extension.js")), true);
+    assert.equal(fs.existsSync(path.join(tmpLib, "enhance-ide-hook.js")), true);
+    assert.equal(fs.existsSync(path.join(tmpLib, "repair-ide-hook.js")), true);
+
+    const svcContent = fs.readFileSync(path.join(tmpSystemd, "antigravity-enhancer-repair.service"), "utf8");
+    const pathContent = fs.readFileSync(path.join(tmpSystemd, "antigravity-enhancer-repair.path"), "utf8");
+    assert.equal(svcContent.includes(`--ext-dir ${tmpLib}`), true);
+    assert.equal(svcContent.includes(__dirname), false);
+    assert.equal(pathContent.includes(`PathChanged=${nativeJs}`), true);
+
+    const disableOut = execFileSync(
+      process.execPath,
+      [
+        path.join(__dirname, "repair-ide-hook.js"),
+        "--disable-auto-repair",
+        "--systemd-dir",
+        tmpSystemd,
+        "--install-lib-dir",
+        tmpLib,
+      ],
+      { encoding: "utf8", env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" } }
+    );
+    assert.equal(JSON.parse(disableOut.trim()).disabled, true);
+    assert.equal(fs.existsSync(path.join(tmpSystemd, "antigravity-enhancer-repair.service")), false);
+    assert.equal(fs.existsSync(path.join(tmpSystemd, "antigravity-enhancer-repair.path")), false);
+    assert.equal(fs.existsSync(tmpLib), false);
+  } finally {
+    fs.rmSync(tmpApp, { recursive: true, force: true });
+    fs.rmSync(tmpSystemd, { recursive: true, force: true });
+    fs.rmSync(tmpLib, { recursive: true, force: true });
+  }
 });

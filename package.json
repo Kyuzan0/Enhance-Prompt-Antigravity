@@ -2,7 +2,7 @@
   "name": "ag-ide-prompt-enhancer",
   "displayName": "Antigravity IDE Prompt Enhancer",
   "description": "Adds an Enhance Prompt button, customizable keyboard shortcut, and settings in Antigravity IDE while preserving @mentions and attachments.",
-  "version": "1.4.9",
+  "version": "1.5.0",
   "publisher": "kyuzan0",
   "icon": "assets/icon.png",
   "galleryBanner": {
@@ -47,7 +47,7 @@
   "main": "./extension.js",
   "scripts": {
     "check:scripts": "node --check scripts/package-vsix.mjs && node --check scripts/release.mjs && node --check scripts/auto-bump-on-commit.mjs && node --check scripts/verify-version.mjs",
-    "check": "node --check extension.js && node --check enhance-ide-hook.js && npm run check:scripts",
+    "check": "node --check extension.js && node --check enhance-ide-hook.js && node --check repair-ide-hook.js && npm run check:scripts",
     "verify:version": "node scripts/verify-version.mjs",
     "test": "node --test ide-extension.test.mjs",
     "verify:contracts": "node verify-contracts.mjs",

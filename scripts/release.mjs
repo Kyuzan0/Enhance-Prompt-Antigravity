@@ -151,6 +151,7 @@ function main() {
     // Verify syntax, version lockstep, unit tests, and contracts
     runNode(['--check', 'extension.js']);
     runNode(['--check', 'enhance-ide-hook.js']);
+    runNode(['--check', 'repair-ide-hook.js']);
     runNode(['--check', 'scripts/package-vsix.mjs']);
     runNode(['--check', 'scripts/release.mjs']);
     runNode(['--check', 'scripts/auto-bump-on-commit.mjs']);

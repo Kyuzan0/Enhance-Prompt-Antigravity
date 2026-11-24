@@ -207,6 +207,11 @@ if ($Uninstall) {
         }
     }
 
+    $userCfgPath = Join-Path $env:USERPROFILE ".antigravity-enhancer\config.json"
+    if ((Test-Path -LiteralPath $userCfgPath) -and $PSCmdlet.ShouldProcess($userCfgPath, "Remove user enhancer config")) {
+        Remove-Item -LiteralPath $userCfgPath -Force
+    }
+
     if ($resolvedAppRoot -and $PSCmdlet.ShouldProcess((Join-Path $resolvedAppRoot "product.json"), "Restore workbench checksums in product.json")) {
         [void](Sync-ProductJsonChecksums -AppRoot $resolvedAppRoot)
     }
@@ -277,10 +282,10 @@ if ($resolvedVsix) {
         }
     }
 } else {
-    foreach ($f in @("package.json", "extension.js", "enhance-ide-hook.js")) {
+    foreach ($f in @("package.json", "extension.js", "enhance-ide-hook.js", "repair-ide-hook.js")) {
         $srcFile = Join-Path $srcDir $f
         $dstFile = Join-Path $dstDir $f
-        if ($PSCmdlet.ShouldProcess($dstFile, "Copy $f")) {
+        if ((Test-Path -LiteralPath $srcFile) -and $PSCmdlet.ShouldProcess($dstFile, "Copy $f")) {
             Copy-Item -LiteralPath $srcFile -Destination $dstFile -Force
         }
     }
@@ -420,7 +425,7 @@ if ($agyExtJs -and (Test-Path -LiteralPath $agyExtJs)) {
             if (-not $anchor.StartsWith('async', [System.StringComparison]::Ordinal)) {
                 $anchor = 'async ' + $anchor
             }
-            $hookExpr = $marker + $urlVar + '=await (async(u)=>{try{if(!/^http:\/\/127\.0\.0\.1:(\d+)/.test(u))return u;const fs=require("fs"),p=require("path").join(__dirname,"..","..","..","out","vs","code","electron-browser","workbench","enhance-ide-hook-config.json");for(const dl=Date.now()+2400;;){let cfg=null;try{cfg=JSON.parse(fs.readFileSync(p,"utf8"));}catch(e){if(e&&e.code==="ENOENT")return u;}if(cfg&&Number.isInteger(cfg.port)&&cfg.port>0&&cfg.port<65536&&cfg.token){try{const response=await fetch("http://127.0.0.1:"+cfg.port+"/__enhancer/config.json",{signal:AbortSignal.timeout(250),redirect:"error"});if(response.ok){const live=await response.json();if(live&&!live.supportsSignedIframe)return u;if(live&&live.supportsSignedIframe&&live.token===cfg.token){const x=new URL(u);const hp=x.port;x.searchParams.set("__agy_hub",hp);x.searchParams.set("__agy_sig",require("crypto").createHmac("sha256",String(cfg.token)).update(String(hp)).digest("hex").slice(0,16));x.port=String(cfg.port);return x.toString()}}}catch{}}if(Date.now()>=dl)break;await new Promise((r)=>setTimeout(r,150))}}catch{}return u})(' + $urlVar + ');'
+            $hookExpr = $marker + $urlVar + '=await (async(u)=>{try{if(!/^http:\/\/127\.0\.0\.1:(\d+)/.test(u))return u;const fs=require("fs"),path=require("path"),os=require("os");const ps=[path.join(os.homedir(),".antigravity-enhancer","config.json"),path.join(__dirname,"..","..","..","out","vs","code","electron-browser","workbench","enhance-ide-hook-config.json")];for(const dl=Date.now()+2400;;){let foundAny=false;const seen=new Set();for(const p of ps){let cfg=null;try{cfg=JSON.parse(fs.readFileSync(p,"utf8"));foundAny=true}catch(e){if(!e||e.code!=="ENOENT")foundAny=true;continue}if(cfg&&Number.isInteger(cfg.port)&&cfg.port>0&&cfg.port<65536&&cfg.token){const k=cfg.port+":"+cfg.token;if(seen.has(k))continue;seen.add(k);try{const response=await fetch("http://127.0.0.1:"+cfg.port+"/__enhancer/config.json",{signal:AbortSignal.timeout(250),redirect:"error"});if(response.ok){const live=await response.json();if(live&&!live.supportsSignedIframe)return u;if(live&&live.supportsSignedIframe&&live.token===cfg.token){const x=new URL(u);const hp=x.port;x.searchParams.set("__agy_hub",hp);x.searchParams.set("__agy_sig",require("crypto").createHmac("sha256",String(cfg.token)).update(String(hp)).digest("hex").slice(0,16));x.port=String(cfg.port);return x.toString()}}}catch{}}}if(!foundAny||Date.now()>=dl)break;await new Promise((r)=>setTimeout(r,150))}}catch{}return u})(' + $urlVar + ');'
             $remainder = $extContent.Substring($hookEnd)
             $nextContent = $extContent.Substring(0, $target.Index) + $anchor + $hookExpr + $remainder
             if ($nextContent -ceq $extContent) {

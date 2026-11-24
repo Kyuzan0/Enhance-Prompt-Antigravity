@@ -14,6 +14,9 @@ const { execFile } = require("node:child_process");
 
 const HOOK_SCRIPT_NAME = "enhance-ide-hook.js";
 const HOOK_CONFIG_NAME = "enhance-ide-hook-config.json";
+const USER_CONFIG_DIR_NAME = ".antigravity-enhancer";
+const USER_CONFIG_FILE_NAME = "config.json";
+const REPAIR_SCRIPT_NAME = "repair-ide-hook.js";
 const SCRIPT_TAG = `<script src="./${HOOK_SCRIPT_NAME}" type="module"></script>`;
 const IFRAME_HOOK_MARKER = "/*AGY_ENHANCER_IFRAME_HOOK*/";
 const HUB_COOKIE_NAME = "agy_enhancer_hub";
@@ -546,16 +549,18 @@ function buildIframeHookSnippet(varName) {
   return (
     `${IFRAME_HOOK_MARKER}${varName}=await (async(u)=>{try{` +
     `if(!/^http:\\/\\/127\\.0\\.0\\.1:(\\d+)/.test(u))return u;` +
-    `const fs=require("fs"),p=require("path").join(__dirname,"..","..","..","out","vs","code","electron-browser","workbench","${HOOK_CONFIG_NAME}");` +
+    `const fs=require("fs"),path=require("path"),os=require("os");` +
+    `const ps=[path.join(os.homedir(),"${USER_CONFIG_DIR_NAME}","${USER_CONFIG_FILE_NAME}"),path.join(__dirname,"..","..","..","out","vs","code","electron-browser","workbench","${HOOK_CONFIG_NAME}")];` +
     `for(const dl=Date.now()+2400;;){` +
-    `let cfg=null;try{cfg=JSON.parse(fs.readFileSync(p,"utf8"));}catch(e){if(e&&e.code==="ENOENT")return u;}` +
-    `if(cfg&&Number.isInteger(cfg.port)&&cfg.port>0&&cfg.port<65536&&cfg.token){` +
+    `let foundAny=false;const seen=new Set();` +
+    `for(const p of ps){let cfg=null;try{cfg=JSON.parse(fs.readFileSync(p,"utf8"));foundAny=true}catch(e){if(!e||e.code!=="ENOENT")foundAny=true;continue}` +
+    `if(cfg&&Number.isInteger(cfg.port)&&cfg.port>0&&cfg.port<65536&&cfg.token){const k=cfg.port+":"+cfg.token;if(seen.has(k))continue;seen.add(k);` +
     `try{const response=await fetch("http://127.0.0.1:"+cfg.port+"/__enhancer/config.json",{signal:AbortSignal.timeout(250),redirect:"error"});` +
     `if(response.ok){const live=await response.json();if(live&&!live.supportsSignedIframe)return u;if(live&&live.supportsSignedIframe&&live.token===cfg.token){` +
     `const x=new URL(u);const hp=x.port;x.searchParams.set("__agy_hub",hp);` +
     `x.searchParams.set("__agy_sig",require("crypto").createHmac("sha256",String(cfg.token)).update(String(hp)).digest("hex").slice(0,16));` +
-    `x.port=String(cfg.port);return x.toString()}}}catch{}}` +
-    `if(Date.now()>=dl)break;await new Promise((r)=>setTimeout(r,150))}` +
+    `x.port=String(cfg.port);return x.toString()}}}catch{}}}` +
+    `if(!foundAny||Date.now()>=dl)break;await new Promise((r)=>setTimeout(r,150))}` +
     `}catch{}return u})(${varName});`
   );
 }
@@ -684,14 +689,49 @@ function patchAgyExtensionIframe(appRoot) {
   return true;
 }
 
+function getUserConfigPath(homeOverride = "") {
+  return path.join(homeOverride || os.homedir(), USER_CONFIG_DIR_NAME, USER_CONFIG_FILE_NAME);
+}
+
+function writeUserRuntimeConfig(port, token, homeOverride = "") {
+  const cfgPath = getUserConfigPath(homeOverride);
+  const cfgDir = path.dirname(cfgPath);
+  fs.mkdirSync(cfgDir, { recursive: true, mode: 0o700 });
+  fs.writeFileSync(cfgPath, JSON.stringify({ port, token }), { encoding: "utf8", mode: 0o600 });
+  if (process.platform !== "win32") {
+    try {
+      fs.chmodSync(cfgPath, 0o600);
+    } catch {
+      // ignore
+    }
+  }
+  return cfgPath;
+}
+
 function ensureIdeHookInstalled(context, port, token, appRootOverride = "", options = {}) {
   const appRoot = appRootOverride || (vscode && vscode.env && vscode.env.appRoot) || "";
   if (!appRoot) {
-    return { patched: false, hookUpdated: false, checksumsUpdated: false, configWritten: false, permissionDenied: false, reason: "appRoot unavailable" };
+    return {
+      patched: false,
+      hookUpdated: false,
+      checksumsUpdated: false,
+      configWritten: false,
+      userConfigWritten: false,
+      permissionDenied: false,
+      reason: "appRoot unavailable",
+    };
   }
   const wbDir = path.join(appRoot, "out", "vs", "code", "electron-browser", "workbench");
   if (!fs.existsSync(wbDir)) {
-    return { patched: false, hookUpdated: false, checksumsUpdated: false, configWritten: false, permissionDenied: false, reason: "workbench dir not found" };
+    return {
+      patched: false,
+      hookUpdated: false,
+      checksumsUpdated: false,
+      configWritten: false,
+      userConfigWritten: false,
+      permissionDenied: false,
+      reason: "workbench dir not found",
+    };
   }
 
   const errors = [];
@@ -705,24 +745,41 @@ function ensureIdeHookInstalled(context, port, token, appRootOverride = "", opti
   const srcHook = path.join(context.extensionPath, HOOK_SCRIPT_NAME);
   const dstHook = path.join(wbDir, HOOK_SCRIPT_NAME);
   const srcBytes = fs.readFileSync(srcHook, "utf8");
+  const hookExists = fs.existsSync(dstHook);
   let hookUpdated = false;
   try {
-    if (!fs.existsSync(dstHook) || fs.readFileSync(dstHook, "utf8") !== srcBytes) {
+    if (!hookExists || fs.readFileSync(dstHook, "utf8") !== srcBytes) {
       fs.writeFileSync(dstHook, srcBytes, "utf8");
       hookUpdated = true;
     }
   } catch (err) {
-    recordWriteError("hook write failed", err);
+    const code = err && err.code ? String(err.code) : "";
+    // If enhance-ide-hook.js already exists in workbench, /__enhancer/hook.js serves latest code live.
+    if (!(hookExists && (code === "EACCES" || code === "EPERM"))) {
+      recordWriteError("hook write failed", err);
+    }
   }
 
-  let configWritten = false;
+  let userConfigWritten = false;
+  let legacyConfigWritten = false;
   if (!options.skipConfigOverwrite) {
+    if (!options.skipUserConfig) {
+      try {
+        writeUserRuntimeConfig(port, token, options.userHomeDir || "");
+        userConfigWritten = true;
+      } catch (err) {
+        recordWriteError("user config write failed", err);
+      }
+    }
     const cfgPath = path.join(wbDir, HOOK_CONFIG_NAME);
     try {
       fs.writeFileSync(cfgPath, JSON.stringify({ port, token }), "utf8");
-      configWritten = true;
+      legacyConfigWritten = true;
     } catch (err) {
-      recordWriteError("config write failed", err);
+      const code = err && err.code ? String(err.code) : "";
+      if (!(userConfigWritten && (code === "EACCES" || code === "EPERM"))) {
+        recordWriteError("config write failed", err);
+      }
     }
   }
 
@@ -771,10 +828,162 @@ function ensureIdeHookInstalled(context, port, token, appRootOverride = "", opti
     patched: htmlPatched || iframePatched,
     hookUpdated,
     checksumsUpdated,
-    configWritten,
+    configWritten: userConfigWritten || legacyConfigWritten,
+    userConfigWritten,
     permissionDenied,
     reason: errors.length ? errors.join("; ") : undefined,
   };
+}
+
+function shellSingleQuote(str) {
+  return `'${String(str || "").replace(/'/g, `'"'"'`)}'`;
+}
+
+function psSingleQuote(str) {
+  return `'${String(str || "").replace(/'/g, "''")}'`;
+}
+
+function resolveRepairRuntime(appRoot, execPath = process.execPath) {
+  if (execPath && typeof execPath === "string" && fs.existsSync(execPath)) {
+    return execPath;
+  }
+  if (appRoot) {
+    const candidate = path.resolve(appRoot, "..", "..", process.platform === "win32" ? "Antigravity.exe" : "antigravity-ide");
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  if (process.platform !== "win32" && fs.existsSync("/usr/bin/node")) return "/usr/bin/node";
+  return execPath || "node";
+}
+
+function buildElevatedRepairInvocation({
+  platform = process.platform,
+  execPath = process.execPath,
+  repairScriptPath,
+  extDir,
+  appRoot,
+  enableAutoRepair = false,
+  pkexecPath = "/usr/bin/pkexec",
+  envPath = "/usr/bin/env",
+} = {}) {
+  if (!repairScriptPath || !extDir || !appRoot) {
+    throw new Error("repairScriptPath, extDir, and appRoot are required");
+  }
+  const runtime = resolveRepairRuntime(appRoot, execPath);
+  const scriptArgs = [repairScriptPath, "--ext-dir", extDir, "--app-root", appRoot];
+  if (enableAutoRepair) {
+    scriptArgs.push("--enable-auto-repair");
+  }
+
+  if (platform === "linux") {
+    const quotedArgs = [runtime, ...scriptArgs].map(shellSingleQuote).join(" ");
+    return {
+      command: pkexecPath,
+      args: [envPath, "ELECTRON_RUN_AS_NODE=1", runtime, ...scriptArgs],
+      shellCommand: `sudo env ELECTRON_RUN_AS_NODE=1 ${quotedArgs}`,
+    };
+  }
+
+  if (platform === "darwin") {
+    const innerCmd = `ELECTRON_RUN_AS_NODE=1 ${[runtime, ...scriptArgs].map(shellSingleQuote).join(" ")}`;
+    return {
+      command: "/usr/bin/osascript",
+      args: ["-e", `do shell script ${JSON.stringify(innerCmd)} with administrator privileges`],
+      shellCommand: `sudo ${innerCmd}`,
+    };
+  }
+
+  if (platform === "win32") {
+    const argList = scriptArgs.map(psSingleQuote).join(", ");
+    const psCmd = `$env:ELECTRON_RUN_AS_NODE='1'; $p=Start-Process -FilePath ${psSingleQuote(runtime)} -ArgumentList @(${argList}) -Verb RunAs -Wait -PassThru; exit $p.ExitCode`;
+    return {
+      command: "powershell.exe",
+      args: ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", psCmd],
+      shellCommand: `powershell -NoProfile -Command ${psSingleQuote(psCmd)}`,
+    };
+  }
+
+  throw new Error(`Unsupported platform for elevated repair: ${platform}`);
+}
+
+function isSystemdAvailable() {
+  return (
+    process.platform === "linux" &&
+    fs.existsSync("/etc/systemd/system") &&
+    fs.existsSync("/run/systemd/system")
+  );
+}
+
+function runElevatedRepair({ extDir, appRoot, enableAutoRepair = false, logger } = {}) {
+  const repairScriptPath = path.join(extDir || __dirname, REPAIR_SCRIPT_NAME);
+  if (!fs.existsSync(repairScriptPath)) {
+    return Promise.resolve({
+      ok: false,
+      error: `${REPAIR_SCRIPT_NAME} not found in ${extDir}`,
+      shellCommand: "",
+    });
+  }
+
+  const inv = buildElevatedRepairInvocation({
+    repairScriptPath,
+    extDir,
+    appRoot,
+    enableAutoRepair,
+  });
+
+  if (process.platform === "linux" && !fs.existsSync(inv.command)) {
+    return Promise.resolve({
+      ok: false,
+      missingElevator: true,
+      error: "pkexec is not available on this system",
+      shellCommand: inv.shellCommand,
+    });
+  }
+
+  return new Promise((resolve) => {
+    execFile(
+      inv.command,
+      inv.args,
+      { timeout: 60000, maxBuffer: 2 * 1024 * 1024 },
+      (err, stdout, stderr) => {
+        if (err) {
+          const stderrText = String(stderr || "").trim();
+          const msg = stderrText || err.message || String(err);
+          const cancelled =
+            err.code === 126 ||
+            err.code === 127 ||
+            /dismiss|cancel/i.test(msg);
+          if (typeof logger === "function") {
+            logger(`Elevated repair ${cancelled ? "cancelled" : "failed"}: ${msg}`);
+          }
+          resolve({
+            ok: false,
+            cancelled,
+            error: msg,
+            shellCommand: inv.shellCommand,
+          });
+          return;
+        }
+        try {
+          const lines = String(stdout || "").trim().split(/\r?\n/).filter(Boolean);
+          const last = lines.length ? JSON.parse(lines[lines.length - 1]) : {};
+          resolve({
+            ok: Boolean(last.ok),
+            status: last.status || null,
+            autoRepairEnabled: Boolean(last.autoRepairEnabled),
+            shellCommand: inv.shellCommand,
+          });
+        } catch (parseErr) {
+          resolve({
+            ok: true,
+            status: null,
+            autoRepairEnabled: Boolean(enableAutoRepair),
+            shellCommand: inv.shellCommand,
+            note: parseErr.message,
+          });
+        }
+      }
+    );
+  });
 }
 
 function parsePortCookie(cookieHeader) {
@@ -1581,6 +1790,117 @@ function activate(context) {
 
   const preferredPort = resolvePreferredPort();
   let lastHookStatus = null;
+  let repairModalOpen = false;
+  const retryStatusBar = vscode?.window?.createStatusBarItem
+    ? vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100)
+    : null;
+  if (retryStatusBar) {
+    retryStatusBar.text = "$(sparkle) Enhance Setup (Retry)";
+    retryStatusBar.tooltip = "Antigravity IDE Prompt Enhancer: IDE folder is read-only. Click to grant permission and enable the Enhance button.";
+    retryStatusBar.command = "antigravityEnhancer.reinstallHook";
+    retryStatusBar.hide();
+    context.subscriptions.push(retryStatusBar);
+  }
+
+  const promptElevatedRepairModal = async (triggerSource = "startup") => {
+    if (!vscode?.window?.showWarningMessage || repairModalOpen) return;
+    const appRoot = (vscode.env && vscode.env.appRoot) || "";
+    const extDir = (context && context.extensionPath) || __dirname;
+    if (!appRoot) return;
+
+    repairModalOpen = true;
+    try {
+      const canAutoRepair = isSystemdAvailable();
+      const buttons = canAutoRepair
+        ? ["Yes (Enable & Auto-Repair)", "Yes (This Time Only)"]
+        : ["Yes, Enable Now"];
+      const detail = canAutoRepair
+        ? `IDE folder (${appRoot}) is read-only.\n\n` +
+          `• Yes (Enable & Auto-Repair): Opens the system admin password prompt (pkexec), restores the Enhance button, and installs a lightweight systemd.path watcher so future Antigravity IDE updates repair automatically.\n` +
+          `• Yes (This Time Only): Restores the Enhance button now without installing the background watcher.\n` +
+          `• Cancel: Skip for now. You can retry anytime from the Status Bar ("Enhance Setup (Retry)").`
+        : `IDE folder (${appRoot}) is read-only.\n\n` +
+          `• Yes, Enable Now: Opens the system admin password prompt to restore the Enhance button.\n` +
+          `• Cancel: Skip for now. You can retry anytime from the Status Bar ("Enhance Setup (Retry)").`;
+
+      const choice = await vscode.window.showWarningMessage(
+        "Antigravity IDE Prompt Enhancer needs admin permission to enable the Enhance button.",
+        { modal: true, detail },
+        ...buttons
+      );
+
+      if (!choice) {
+        if (retryStatusBar) retryStatusBar.show();
+        log(`Admin repair deferred by user (${triggerSource}).`);
+        return;
+      }
+
+      const enableAutoRepair = choice === "Yes (Enable & Auto-Repair)";
+      const result = await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: "Antigravity IDE Prompt Enhancer: Applying IDE hook...",
+          cancellable: false,
+        },
+        () => runElevatedRepair({ extDir, appRoot, enableAutoRepair, logger: log })
+      );
+
+      if (result.ok) {
+        if (retryStatusBar) retryStatusBar.hide();
+        try {
+          lastHookStatus = ensureIdeHookInstalled(context, srv.getPort() || preferredPort, token);
+        } catch {
+          // ignore
+        }
+        const autoMsg = result.autoRepairEnabled
+          ? " (auto-repair enabled for future IDE updates)"
+          : "";
+        const reloadChoice = await vscode.window.showInformationMessage(
+          `Antigravity IDE Prompt Enhancer hook installed${autoMsg}. Reload window to show the Enhance button.`,
+          "Reload Window"
+        );
+        if (reloadChoice === "Reload Window") {
+          vscode.commands.executeCommand("workbench.action.reloadWindow");
+        }
+      } else {
+        if (retryStatusBar) retryStatusBar.show();
+        if (result.cancelled) {
+          const next = await vscode.window.showWarningMessage(
+            "Admin permission was cancelled. You can retry anytime from the Status Bar.",
+            "Retry",
+            "Show Diagnostics"
+          );
+          if (next === "Retry") {
+            repairModalOpen = false;
+            return promptElevatedRepairModal("retry");
+          }
+          if (next === "Show Diagnostics") {
+            vscode.commands.executeCommand("antigravityEnhancer.diagnostics");
+          }
+        } else {
+          const next = await vscode.window.showWarningMessage(
+            `Could not apply IDE hook automatically (${result.error}).`,
+            "Retry",
+            "Copy sudo Command",
+            "Show Diagnostics"
+          );
+          if (next === "Retry") {
+            repairModalOpen = false;
+            return promptElevatedRepairModal("retry");
+          }
+          if (next === "Copy sudo Command" && result.shellCommand && vscode.env?.clipboard) {
+            await vscode.env.clipboard.writeText(result.shellCommand);
+            vscode.window.showInformationMessage("Repair command copied to clipboard.");
+          }
+          if (next === "Show Diagnostics") {
+            vscode.commands.executeCommand("antigravityEnhancer.diagnostics");
+          }
+        }
+      }
+    } finally {
+      repairModalOpen = false;
+    }
+  };
 
   const onListening = async (isFallbackPort = false) => {
     const addr = srv.server.address();
@@ -1599,32 +1919,32 @@ function activate(context) {
       lastHookStatus = status;
       if (status.reason) log(`Hook status note: ${status.reason}`);
       if (status.permissionDenied) {
-        const repairHint = process.platform === "win32"
-          ? "Run install-ide-enhancer.ps1 as Administrator to restore the Enhance button after IDE update."
-          : "Run install-ide-enhancer.sh with sudo to restore the Enhance button after IDE update.";
-        vscode.window
-          .showWarningMessage(`Antigravity IDE Prompt Enhancer: IDE folder is read-only. ${repairHint}`, "Show Diagnostics")
-          .then((choice) => {
-            if (choice === "Show Diagnostics") {
-              vscode.commands.executeCommand("antigravityEnhancer.diagnostics");
-            }
-          });
-      } else if (status.patched) {
-        vscode.window
-          .showInformationMessage(
-            "Antigravity IDE Prompt Enhancer hook restored after IDE update. Reload window to show the Enhance button.",
-            "Reload Window"
-          )
-          .then((choice) => {
-            if (choice === "Reload Window") {
-              vscode.commands.executeCommand("workbench.action.reloadWindow");
-            }
-          });
+        if (retryStatusBar) retryStatusBar.show();
+        promptElevatedRepairModal("startup");
+      } else {
+        if (retryStatusBar) retryStatusBar.hide();
+        if (status.patched) {
+          vscode.window
+            .showInformationMessage(
+              "Antigravity IDE Prompt Enhancer hook restored after IDE update. Reload window to show the Enhance button.",
+              "Reload Window"
+            )
+            .then((choice) => {
+              if (choice === "Reload Window") {
+                vscode.commands.executeCommand("workbench.action.reloadWindow");
+              }
+            });
+        }
       }
     } catch (err) {
       const msg = err?.message || String(err);
-      lastHookStatus = { patched: false, permissionDenied: err?.code === "EACCES" || err?.code === "EPERM", reason: msg };
+      const isPerm = err?.code === "EACCES" || err?.code === "EPERM";
+      lastHookStatus = { patched: false, permissionDenied: isPerm, reason: msg };
       log(`Failed to ensure IDE hook: ${msg}`);
+      if (isPerm) {
+        if (retryStatusBar) retryStatusBar.show();
+        promptElevatedRepairModal("startup-error");
+      }
     }
   };
 
@@ -1663,11 +1983,26 @@ function activate(context) {
     vscode.commands.registerCommand("antigravityEnhancer.reinstallHook", () => {
       const status = ensureIdeHookInstalled(context, srv.getPort(), token);
       lastHookStatus = status;
-      vscode.window.showInformationMessage(
-        status.patched || status.checksumsUpdated
-          ? "Prompt Enhancer IDE hook and checksums updated. Please reload window."
-          : "Prompt Enhancer IDE hook is already up to date."
-      );
+      if (status.permissionDenied) {
+        if (retryStatusBar) retryStatusBar.show();
+        promptElevatedRepairModal("command");
+        return;
+      }
+      if (retryStatusBar) retryStatusBar.hide();
+      if (status.patched || status.checksumsUpdated) {
+        vscode.window
+          .showInformationMessage(
+            "Prompt Enhancer IDE hook and checksums updated. Please reload window.",
+            "Reload Window"
+          )
+          .then((choice) => {
+            if (choice === "Reload Window") {
+              vscode.commands.executeCommand("workbench.action.reloadWindow");
+            }
+          });
+      } else {
+        vscode.window.showInformationMessage("Prompt Enhancer IDE hook is already up to date.");
+      }
     }),
     vscode.commands.registerCommand("antigravityEnhancer.about", () => {
       showAboutInfo(context);
@@ -1731,7 +2066,11 @@ module.exports = {
   patchAgyExtensionContent,
   computeFileChecksum,
   syncProductJsonChecksums,
+  getUserConfigPath,
+  writeUserRuntimeConfig,
   ensureIdeHookInstalled,
+  resolveRepairRuntime,
+  buildElevatedRepairInvocation,
   isAllowedEnhancerOrigin,
   isAllowedEnhancerRequest,
   verifyToken,

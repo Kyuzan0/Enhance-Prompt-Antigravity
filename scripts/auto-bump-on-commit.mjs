@@ -59,6 +59,7 @@ function classifyCommit(subject, body, stagedFiles) {
   const runtimeFiles = new Set([
     'extension.js',
     'enhance-ide-hook.js',
+    'repair-ide-hook.js',
     'package.json',
     'install-ide-enhancer.ps1',
     'install-ide-enhancer.sh',
@@ -171,6 +172,7 @@ function main() {
     for (const args of [
       ['--check', 'extension.js'],
       ['--check', 'enhance-ide-hook.js'],
+      ['--check', 'repair-ide-hook.js'],
       ['--check', 'scripts/package-vsix.mjs'],
       ['--check', 'scripts/release.mjs'],
       ['--check', 'scripts/auto-bump-on-commit.mjs'],
