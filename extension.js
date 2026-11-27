@@ -360,6 +360,34 @@ function isModelNotFoundError(msg) {
   );
 }
 
+function classifyCliFailure({ code = null, signal = null, stderr = "", stdout = "", timedOut = false, timeoutMs = DEFAULT_TIMEOUT_MS, bufferExceeded = false } = {}) {
+  if (timedOut) {
+    return { message: `agy -p timed out after ${timeoutMs}ms`, retryableModelFallback: false };
+  }
+  if (bufferExceeded) {
+    return { message: "agy -p output exceeded buffer limit", retryableModelFallback: false };
+  }
+  const raw = String(stderr || stdout || "").trim();
+  if (signal === "SIGKILL") {
+    return {
+      message: "Antigravity CLI was terminated (SIGKILL — possible out-of-memory); retry or reload window.",
+      retryableModelFallback: false,
+    };
+  }
+  if (/ECONNREFUSED/i.test(raw)) {
+    return {
+      message: `Antigravity backend connection refused (${raw.slice(0, 120)}); reload window to reconnect.`,
+      retryableModelFallback: false,
+    };
+  }
+  const fallbackReason = `agy -p exited with code ${code}${signal ? ` (${signal})` : ""}`;
+  const message = raw || fallbackReason;
+  return {
+    message,
+    retryableModelFallback: !signal && isModelNotFoundError(message),
+  };
+}
+
 function buildEnhancePrompt(draft, context, workspaceContext, settings) {
   const effectiveSettings = normalizeSettings(settings);
   const langRule =
@@ -604,19 +632,22 @@ function runEnhanceCli({ draft, context, model, cwd, settings, signal, logger })
         const stdout = Buffer.concat(stdoutChunks).toString("utf8");
         const stderr = Buffer.concat(stderrChunks).toString("utf8");
         if (timedOut || bufferExceeded || code !== 0 || sig) {
-          const fallbackReason = timedOut
-            ? `agy -p timed out after ${timeoutMs}ms`
-            : bufferExceeded
-              ? "agy -p output exceeded buffer limit"
-              : `agy -p exited with code ${code}${sig ? ` (${sig})` : ""}`;
-          const msg = (stderr || stdout || fallbackReason).trim();
-          const logLine = `[PromptEnhancer] agy -p failed (model=${attemptModel || "default"}): ${msg}`;
+          const classified = classifyCliFailure({
+            code,
+            signal: sig,
+            stderr,
+            stdout,
+            timedOut,
+            timeoutMs,
+            bufferExceeded,
+          });
+          const logLine = `[PromptEnhancer] agy -p failed (model=${attemptModel || "default"}): ${classified.message}`;
           if (typeof logger === "function") logger(logLine);
           else console.error(logLine);
-          if (allowFallback && attemptModel && !timedOut && !bufferExceeded && isModelNotFoundError(msg)) {
+          if (allowFallback && attemptModel && classified.retryableModelFallback) {
             return execAttempt("", false);
           }
-          return reject(new Error(msg.slice(0, 260)));
+          return reject(new Error(classified.message.slice(0, 260)));
         }
         const enhanced = cleanOutput(stdout);
         if (!enhanced) {
@@ -1398,6 +1429,11 @@ function createEnhancerServer({
   let lastHubPort = 0;
   const trustedHubPorts = new Set();
   const sseClients = new Set();
+  const recentProxyErrors = [];
+  const recordProxyError = (entry) => {
+    recentProxyErrors.push(`${new Date().toISOString()} ${entry}`);
+    if (recentProxyErrors.length > 10) recentProxyErrors.shift();
+  };
   const resolveSettings = typeof getSettings === "function" ? getSettings : readAllSettings;
   const log = typeof logger === "function" ? logger : (msg) => console.error(msg);
 
@@ -1676,80 +1712,121 @@ function createEnhancerServer({
       res.end(JSON.stringify({ ok: false, error: "Untrusted hub target" }));
       return;
     }
-    if (sigOk) trustedHubPorts.add(hubPort);
-    lastHubPort = hubPort;
+    if (sigOk) {
+      trustedHubPorts.add(hubPort);
+      lastHubPort = hubPort;
+    } else if (!lastHubPort || !trustedHubPorts.has(lastHubPort)) {
+      lastHubPort = hubPort;
+    }
 
-    const headers = { ...req.headers, host: `127.0.0.1:${hubPort}` };
-    delete headers["accept-encoding"];
+    const canFailoverMethod = ["GET", "HEAD", "OPTIONS"].includes(req.method);
+    const forwardHttpToHub = (targetPort, { allowFailover, refreshCookie }) => {
+      const headers = { ...req.headers, host: `127.0.0.1:${targetPort}` };
+      delete headers["accept-encoding"];
 
-    const proxyReq = http.request(
-      {
-        hostname: "127.0.0.1",
-        port: hubPort,
-        path: forwardPath,
-        method: req.method,
-        headers,
-      },
-      (proxyRes) => {
-        const contentType = String(proxyRes.headers["content-type"] || "");
-        if (contentType.includes("text/html")) {
-          const chunks = [];
-          let totalBytes = 0;
-          let overflowed = false;
-          proxyRes.on("data", (c) => {
-            if (overflowed) return;
-            totalBytes += c.length;
-            if (totalBytes > MAX_HTML_PROXY_BYTES) {
-              overflowed = true;
-              proxyRes.destroy();
+      const proxyReq = http.request(
+        {
+          hostname: "127.0.0.1",
+          port: targetPort,
+          path: forwardPath,
+          method: req.method,
+          headers,
+        },
+        (proxyRes) => {
+          const contentType = String(proxyRes.headers["content-type"] || "");
+          const appendHubCookie = (outHeaders) => {
+            if (!refreshCookie) return;
+            const cookieVal = `${HUB_COOKIE_NAME}=${targetPort}; Path=/; SameSite=Lax`;
+            const prevSetCookie = outHeaders["set-cookie"];
+            outHeaders["set-cookie"] = Array.isArray(prevSetCookie)
+              ? [...prevSetCookie, cookieVal]
+              : prevSetCookie
+                ? [prevSetCookie, cookieVal]
+                : [cookieVal];
+          };
+
+          if (contentType.includes("text/html")) {
+            const chunks = [];
+            let totalBytes = 0;
+            let overflowed = false;
+            proxyRes.on("data", (c) => {
+              if (overflowed) return;
+              totalBytes += c.length;
+              if (totalBytes > MAX_HTML_PROXY_BYTES) {
+                overflowed = true;
+                proxyRes.destroy();
+                if (!res.headersSent) {
+                  res.writeHead(502, { "Content-Type": "text/plain" });
+                  res.end("Upstream HTML response too large");
+                }
+                return;
+              }
+              chunks.push(c);
+            });
+            proxyRes.on("error", (err) => {
               if (!res.headersSent) {
                 res.writeHead(502, { "Content-Type": "text/plain" });
-                res.end("Upstream HTML response too large");
+                res.end(`Hub response error: ${err.message}`);
+              } else {
+                res.destroy();
               }
-              return;
-            }
-            chunks.push(c);
-          });
-          proxyRes.on("error", (err) => {
-            if (!res.headersSent) {
-              res.writeHead(502, { "Content-Type": "text/plain" });
-              res.end(`Hub response error: ${err.message}`);
-            } else {
-              res.destroy();
-            }
-          });
-          proxyRes.on("end", () => {
-            if (overflowed || res.writableEnded) return;
-            const html = injectHookIntoHtml(Buffer.concat(chunks).toString("utf8"));
+            });
+            proxyRes.on("end", () => {
+              if (overflowed || res.writableEnded) return;
+              const html = injectHookIntoHtml(Buffer.concat(chunks).toString("utf8"));
+              const outHeaders = { ...proxyRes.headers };
+              delete outHeaders["content-length"];
+              appendHubCookie(outHeaders);
+              res.writeHead(proxyRes.statusCode || 200, outHeaders);
+              res.end(html);
+            });
+          } else {
             const outHeaders = { ...proxyRes.headers };
-            delete outHeaders["content-length"];
-            if (fromQuery) {
-              const cookieVal = `${HUB_COOKIE_NAME}=${hubPort}; Path=/; SameSite=Lax`;
-              const prevSetCookie = outHeaders["set-cookie"];
-              outHeaders["set-cookie"] = Array.isArray(prevSetCookie)
-                ? [...prevSetCookie, cookieVal]
-                : prevSetCookie
-                  ? [prevSetCookie, cookieVal]
-                  : [cookieVal];
-            }
+            appendHubCookie(outHeaders);
             res.writeHead(proxyRes.statusCode || 200, outHeaders);
-            res.end(html);
-          });
-        } else {
-          res.writeHead(proxyRes.statusCode || 200, proxyRes.headers);
-          proxyRes.pipe(res);
-          proxyRes.on("error", () => res.destroy());
+            proxyRes.pipe(res);
+            proxyRes.on("error", () => res.destroy());
+          }
         }
-      }
-    );
+      );
 
-    proxyReq.on("error", (err) => {
-      if (!res.headersSent) {
-        res.writeHead(502, { "Content-Type": "text/plain" });
+      proxyReq.on("error", (err) => {
+        const errDetail = `HTTP ${req.method} 127.0.0.1:${targetPort}${forwardPath}: ${err?.code || err?.message || "error"}`;
+        recordProxyError(errDetail);
+        log(`[PromptEnhancer] ${errDetail}`);
+        const fallbackPort = lastHubPort;
+        if (
+          allowFailover &&
+          canFailoverMethod &&
+          !res.headersSent &&
+          err &&
+          err.code === "ECONNREFUSED" &&
+          fallbackPort > 0 &&
+          fallbackPort !== targetPort &&
+          fallbackPort !== serverPort &&
+          trustedHubPorts.has(fallbackPort)
+        ) {
+          trustedHubPorts.delete(targetPort);
+          log(`[PromptEnhancer] Hub port ${targetPort} refused connection; failing over to live trusted hub port ${fallbackPort}`);
+          forwardHttpToHub(fallbackPort, { allowFailover: false, refreshCookie: true });
+          return;
+        }
+        if (!res.headersSent) {
+          res.writeHead(502, { "Content-Type": "text/plain" });
+        }
+        if (!res.writableEnded) {
+          res.end(`Hub proxy error (127.0.0.1:${targetPort}): ${err.message}. Reload window if Antigravity backend restarted.`);
+        }
+      });
+
+      if (canFailoverMethod) {
+        proxyReq.end();
+      } else {
+        req.pipe(proxyReq);
       }
-      if (!res.writableEnded) res.end(`Hub proxy error: ${err.message}`);
-    });
-    req.pipe(proxyReq);
+    };
+
+    forwardHttpToHub(hubPort, { allowFailover: true, refreshCookie: fromQuery });
   });
 
   server.on("upgrade", (req, clientSocket, head) => {
@@ -1776,34 +1853,70 @@ function createEnhancerServer({
       clientSocket.destroy();
       return;
     }
-    if (sigOk) trustedHubPorts.add(hubPort);
-    lastHubPort = hubPort;
+    if (sigOk) {
+      trustedHubPorts.add(hubPort);
+      lastHubPort = hubPort;
+    } else if (!lastHubPort || !trustedHubPorts.has(lastHubPort)) {
+      lastHubPort = hubPort;
+    }
 
-    const upstream = net.connect({ host: "127.0.0.1", port: hubPort }, () => {
-      let raw = `${req.method} ${forwardPath} HTTP/${req.httpVersion}\r\n`;
-      for (let i = 0; i < req.rawHeaders.length; i += 2) {
-        const k = req.rawHeaders[i];
-        let v = req.rawHeaders[i + 1];
-        const lk = k.toLowerCase();
-        if (lk === "host") v = `127.0.0.1:${hubPort}`;
-        else if (lk === "origin") v = `http://127.0.0.1:${hubPort}`;
-        raw += `${k}: ${v}\r\n`;
-      }
-      raw += "\r\n";
-      upstream.write(raw);
-      if (head && head.length) upstream.write(head);
-      clientSocket.pipe(upstream);
-      upstream.pipe(clientSocket);
-    });
+    const connectWsUpstream = (targetPort, allowFailover) => {
+      let connected = false;
+      let failedOver = false;
+      const upstream = net.connect({ host: "127.0.0.1", port: targetPort }, () => {
+        connected = true;
+        let raw = `${req.method} ${forwardPath} HTTP/${req.httpVersion}\r\n`;
+        for (let i = 0; i < req.rawHeaders.length; i += 2) {
+          const k = req.rawHeaders[i];
+          let v = req.rawHeaders[i + 1];
+          const lk = k.toLowerCase();
+          if (lk === "host") v = `127.0.0.1:${targetPort}`;
+          else if (lk === "origin") v = `http://127.0.0.1:${targetPort}`;
+          raw += `${k}: ${v}\r\n`;
+        }
+        raw += "\r\n";
+        upstream.write(raw);
+        if (head && head.length) upstream.write(head);
+        clientSocket.pipe(upstream);
+        upstream.pipe(clientSocket);
+      });
 
-    upstream.on("error", () => clientSocket.destroy());
-    clientSocket.on("error", () => upstream.destroy());
-    upstream.on("close", () => {
-      if (!clientSocket.destroyed) clientSocket.destroy();
-    });
-    clientSocket.on("close", () => {
-      if (!upstream.destroyed) upstream.destroy();
-    });
+      upstream.on("error", (err) => {
+        const errDetail = `WS 127.0.0.1:${targetPort}${forwardPath}: ${err?.code || err?.message || "error"}`;
+        recordProxyError(errDetail);
+        log(`[PromptEnhancer] ${errDetail}`);
+        const fallbackPort = lastHubPort;
+        if (
+          !connected &&
+          allowFailover &&
+          err &&
+          err.code === "ECONNREFUSED" &&
+          fallbackPort > 0 &&
+          fallbackPort !== targetPort &&
+          fallbackPort !== serverPort &&
+          trustedHubPorts.has(fallbackPort)
+        ) {
+          failedOver = true;
+          trustedHubPorts.delete(targetPort);
+          log(`[PromptEnhancer] WS hub port ${targetPort} refused connection; failing over to ${fallbackPort}`);
+          connectWsUpstream(fallbackPort, false);
+          return;
+        }
+        clientSocket.destroy();
+      });
+      const onClientEnd = () => {
+        if (!upstream.destroyed) upstream.destroy();
+      };
+      clientSocket.once("error", onClientEnd);
+      clientSocket.once("close", onClientEnd);
+      upstream.on("close", () => {
+        clientSocket.off("error", onClientEnd);
+        clientSocket.off("close", onClientEnd);
+        if (!failedOver && !clientSocket.destroyed) clientSocket.destroy();
+      });
+    };
+
+    connectWsUpstream(hubPort, true);
   });
 
   server.on("close", () => {
@@ -1829,6 +1942,11 @@ function createEnhancerServer({
     trustHubPort: (p) => {
       if (p > 0 && p < 65536) trustedHubPorts.add(p);
     },
+    getHubState: () => ({
+      lastHubPort,
+      trustedHubPorts: [...trustedHubPorts],
+      recentProxyErrors: [...recentProxyErrors],
+    }),
     dispose: () => {
       clearInterval(sseKeepaliveTimer);
       for (const clientRes of sseClients) {
@@ -1842,6 +1960,24 @@ function createEnhancerServer({
       server.close();
     },
   };
+}
+
+function readKdeKeyringDiagnostic(
+  homeOverride = "",
+  { platform = process.platform, desktopEnv = process.env.XDG_CURRENT_DESKTOP || "" } = {}
+) {
+  if (platform !== "linux" || !/kde/i.test(String(desktopEnv))) return "";
+  const argvPath = path.join(homeOverride || os.homedir(), ".antigravity-ide", "argv.json");
+  if (!fs.existsSync(argvPath)) return "KDE desktop detected (argv.json not found)";
+  try {
+    const raw = fs.readFileSync(argvPath, "utf8");
+    const stripped = raw.replace(/^\s*\/\/.*$/gm, "");
+    const parsed = JSON.parse(stripped);
+    const store = parsed && parsed["password-store"] ? String(parsed["password-store"]) : "default";
+    return `KDE password-store=${store}`;
+  } catch (err) {
+    return `KDE argv.json parse error (${err?.message || "unknown"})`;
+  }
 }
 
 function activate(context) {
@@ -2099,11 +2235,14 @@ function activate(context) {
     vscode.commands.registerCommand("antigravityEnhancer.diagnostics", () => {
       const cliBin = findAgyCliBinary();
       const settings = readAllSettings();
+      const keyringInfo = readKdeKeyringDiagnostic();
       const lines = [
         `=== ${extMeta.displayName} v${extMeta.version} (${extId}) ===`,
         `CLI binary: ${cliBin || "NOT FOUND"}`,
         `Proxy port: ${srv.getPort()} (preferred: ${preferredPort})`,
         `Active SSE clients: ${srv.sseClients.size}`,
+        `Hub state: ${JSON.stringify(srv.getHubState())}`,
+        ...(keyringInfo ? [`Keyring info: ${keyringInfo}`] : []),
         `Hook status: ${lastHookStatus ? JSON.stringify(lastHookStatus) : "pending"}`,
         `Settings: ${JSON.stringify(settings)}`,
         `Recent client logs (${recentClientLogs.length}):`,
@@ -2148,6 +2287,7 @@ module.exports = {
   buildStrictDenySettings,
   buildSanitizedCliEnv,
   isModelNotFoundError,
+  classifyCliFailure,
   buildEnhancePrompt,
   cleanOutput,
   resolveHubTarget,
@@ -2157,6 +2297,7 @@ module.exports = {
   syncProductJsonChecksums,
   getUserConfigPath,
   writeUserRuntimeConfig,
+  readKdeKeyringDiagnostic,
   ensureIdeHookInstalled,
   resolveRepairRuntime,
   buildElevatedRepairInvocation,

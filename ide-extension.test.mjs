@@ -956,3 +956,129 @@ test("repair-ide-hook.js patches IDE hook and stages/cleans systemd auto-repair 
     fs.rmSync(tmpLib, { recursive: true, force: true });
   }
 });
+
+test("createEnhancerServer fails over HTTP and WebSocket from dead hub port to live trusted hub without clobbering lastHubPort", async () => {
+  const token = "failover-test-token";
+  const deadSrv = http.createServer((_req, res) => res.end("dead"));
+  await new Promise((resolve) => deadSrv.listen(0, "127.0.0.1", resolve));
+  const deadPort = deadSrv.address().port;
+  await new Promise((resolve) => deadSrv.close(resolve));
+
+  const liveHub = http.createServer((req, res) => {
+    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.end(`LIVE_HUB:${req.url}`);
+  });
+  liveHub.on("upgrade", (_req, socket) => {
+    socket.write("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n");
+    socket.end();
+  });
+  await new Promise((resolve) => liveHub.listen(0, "127.0.0.1", resolve));
+  const liveHubPort = liveHub.address().port;
+
+  const srv = ext.createEnhancerServer({
+    context: { extensionPath: __dirname },
+    token,
+    extMeta: { id: "kyuzan0.ag-ide-prompt-enhancer", version: "1.5.2", displayName: "Test" },
+    publicMeta: { version: "1.5.2" },
+    logger: () => {},
+  });
+  await new Promise((resolve) => srv.server.listen(0, "127.0.0.1", resolve));
+  const port = srv.server.address().port;
+  srv.setPort(port);
+
+  try {
+    // Trust deadPort first, then register liveHubPort as current via signed iframe request
+    srv.trustHubPort(deadPort);
+    const sig = ext.signHubPort(liveHubPort, token);
+    const initRes = await new Promise((resolve, reject) => {
+      const req = http.request(
+        {
+          hostname: "127.0.0.1",
+          port,
+          path: `/?__agy_hub=${liveHubPort}&__agy_sig=${sig}&extensionView=true`,
+          method: "GET",
+          headers: {
+            "Sec-Fetch-Site": "cross-site",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Dest": "iframe",
+          },
+        },
+        (res) => {
+          res.resume();
+          res.on("end", () => resolve({ status: res.statusCode }));
+        }
+      );
+      req.on("error", reject);
+      req.end();
+    });
+    assert.equal(initRes.status, 200);
+    assert.equal(srv.getHubState().lastHubPort, liveHubPort);
+
+    // Stale cookie points to deadPort -> proxy must failover to liveHubPort, heal cookie, evict deadPort
+    const failRes = await fetch(`http://127.0.0.1:${port}/hello`, {
+      headers: {
+        Origin: `http://127.0.0.1:${port}`,
+        Cookie: `agy_enhancer_hub=${deadPort}`,
+      },
+    });
+    assert.equal(failRes.status, 200);
+    assert.equal(await failRes.text(), "LIVE_HUB:/hello");
+    const setCookie = failRes.headers.get("set-cookie") || "";
+    assert.equal(setCookie.includes(`agy_enhancer_hub=${liveHubPort}`), true);
+    assert.equal(srv.getHubState().lastHubPort, liveHubPort);
+    assert.equal(srv.getHubState().trustedHubPorts.includes(deadPort), false);
+    assert.equal(srv.getHubState().recentProxyErrors.length >= 1, true);
+
+    // WebSocket upgrade with stale cookie pointing to deadPort must also fail over cleanly
+    srv.trustHubPort(deadPort);
+    const wsResp = await new Promise((resolve) => {
+      const sock = net.connect({ host: "127.0.0.1", port }, () => {
+        sock.write(
+          `GET /ws HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nOrigin: http://127.0.0.1:${port}\r\nCookie: agy_enhancer_hub=${deadPort}\r\n\r\n`
+        );
+      });
+      let out = "";
+      sock.on("data", (d) => (out += d.toString("utf8")));
+      sock.on("close", () => resolve(out));
+    });
+    assert.equal(wsResp.startsWith("HTTP/1.1 101 Switching Protocols"), true);
+    assert.equal(srv.getHubState().trustedHubPorts.includes(deadPort), false);
+  } finally {
+    srv.dispose();
+    await new Promise((resolve) => liveHub.close(resolve));
+  }
+});
+
+test("classifyCliFailure distinguishes SIGKILL, ECONNREFUSED, timeout, and model fallback", () => {
+  const sigkill = ext.classifyCliFailure({ code: null, signal: "SIGKILL" });
+  assert.equal(sigkill.message.includes("SIGKILL"), true);
+  assert.equal(sigkill.retryableModelFallback, false);
+
+  const econn = ext.classifyCliFailure({ code: 1, stderr: "ConnectError: [unavailable] connect ECONNREFUSED 127.0.0.1:41437" });
+  assert.equal(econn.message.includes("connection refused"), true);
+  assert.equal(econn.retryableModelFallback, false);
+
+  const timedOut = ext.classifyCliFailure({ timedOut: true, timeoutMs: 30000 });
+  assert.equal(timedOut.message, "agy -p timed out after 30000ms");
+
+  const modelErr = ext.classifyCliFailure({ code: 1, stderr: "unknown model foo" });
+  assert.equal(modelErr.retryableModelFallback, true);
+});
+
+test("readKdeKeyringDiagnostic parses commented argv.json safely without modifying disk", () => {
+  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "agy-kde-diag-"));
+  try {
+    const ideDir = path.join(tmpHome, ".antigravity-ide");
+    fs.mkdirSync(ideDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(ideDir, "argv.json"),
+      `// comment\n{\n\t"password-store": "kwallet5"\n}\n`,
+      "utf8"
+    );
+    const out = ext.readKdeKeyringDiagnostic(tmpHome, { platform: "linux", desktopEnv: "KDE" });
+    assert.equal(out, "KDE password-store=kwallet5");
+    assert.equal(ext.readKdeKeyringDiagnostic(tmpHome, { platform: "win32", desktopEnv: "KDE" }), "");
+  } finally {
+    fs.rmSync(tmpHome, { recursive: true, force: true });
+  }
+});

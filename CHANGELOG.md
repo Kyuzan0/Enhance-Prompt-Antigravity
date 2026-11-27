@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.2] - 2026-11-27
+
+### Fixed
+- Added automatic HTTP and WebSocket proxy failover (with dead-port eviction and `Set-Cookie` healing) when a stale `agy_enhancer_hub` cookie/referer points to a crashed/restarted backend port (`ECONNREFUSED`), preventing stale requests from clobbering `lastHubPort`.
+
+### Improved
+- Classified CLI failures (`SIGKILL`, `ECONNREFUSED`, timeout, buffer limit) in `runEnhanceCli` with actionable user messages, and added `Hub state` and read-only KDE keyring status to `Show Diagnostics & Health Check`.
+
 ## [1.5.1] - 2026-11-24
 
 ### Fixed
@@ -143,7 +151,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial release of Antigravity IDE Prompt Enhancer with in-chat **✦ Enhance Prompt** button, loopback reverse proxy, multi-window `__agy_hub` routing, Lexical `@mention`/chip preservation, and strict tool-deny `agy -p` execution.
 
-[Unreleased]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.5.1...HEAD
+[Unreleased]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.5.2...HEAD
+[1.5.2]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.5.1...v1.5.2
 [1.5.1]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.5.0...v1.5.1
 [1.5.0]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.4.9...v1.5.0
 [1.4.9]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.4.8...v1.4.9
