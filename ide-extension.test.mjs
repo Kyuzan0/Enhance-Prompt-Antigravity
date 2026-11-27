@@ -774,6 +774,10 @@ test("package-vsix.mjs builds a clean ZIP archive and SHA256SUMS.txt in build/ e
   const sumsText = fs.readFileSync(sumsPath, "utf8").trim();
   assert.match(sumsText, new RegExp(`^[a-f0-9]{64}  ${vsixName.replace(/\./g, "\\.")}$`));
   assert.equal(out.includes("extension/assets/icon.png"), true);
+  assert.equal(out.includes("extension/assets/banner.svg"), false);
+  assert.equal(out.includes("extension/assets/social-preview.png"), false);
+  assert.equal(out.includes("extension/assets/workflow-overview.svg"), false);
+  assert.equal(out.includes("extension/assets/quick-settings-preview.svg"), false);
   assert.equal(out.includes("extension/repair-ide-hook.js"), true);
   assert.equal(out.includes("extension/.vscodeignore"), false);
   assert.equal(out.includes("extension/build/"), false);

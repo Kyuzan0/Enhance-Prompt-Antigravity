@@ -1,8 +1,13 @@
-# Antigravity IDE Prompt Enhancer
+<p align="center">
+  <img src="assets/banner.svg" alt="Antigravity IDE Prompt Enhancer" width="100%" />
+</p>
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Changelog](https://img.shields.io/badge/Keep%20a%20Changelog-1.1.0-orange.svg)](CHANGELOG.md)
-[![Author: Kyuzan0](https://img.shields.io/badge/Author-Kyuzan0-181717.svg?logo=github)](https://github.com/Kyuzan0)
+<p align="center">
+  <a href="https://open-vsx.org/extension/kyuzan0/ag-ide-prompt-enhancer"><img src="https://img.shields.io/open-vsx/v/kyuzan0/ag-ide-prompt-enhancer?label=Open%20VSX&color=3b82f6" alt="Open VSX Version"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/Keep%20a%20Changelog-1.1.0-orange.svg" alt="Changelog"></a>
+  <a href="https://github.com/Kyuzan0"><img src="https://img.shields.io/badge/Author-Kyuzan0-181717.svg?logo=github" alt="Author: Kyuzan0"></a>
+</p>
 
 Ekstensi VS Code-compatible (`kyuzan0.ag-ide-prompt-enhancer`, versi aktif mengikuti [`package.json`](package.json)) yang menambahkan tombol **✦ Enhance Prompt**, popover **⚙ Quick Settings**, dan shortcut yang dapat dikustomisasi (`Ctrl+Alt+E` / `Cmd+Alt+E`) langsung di sebelah tombol **Send (→)** pada sidebar chat **Antigravity IDE** (`antigravity.panel`), sambil mempertahankan `@mentions`, file chips, dan lampiran Lexical (`[[AGY_CHIP_N]]`).
 
@@ -15,6 +20,20 @@ Ekstensi VS Code-compatible (`kyuzan0.ag-ide-prompt-enhancer`, versi aktif mengi
 - **Preservasi Token & Lampiran:** Menjaga `@file`, `@symbol`, dan attachment chips tanpa mengekspansinya.
 - **Loopback Reverse Proxy & Self-Healing:** Menjalankan HTTP + WebSocket reverse proxy lokal (`127.0.0.1:47831`, terisolasi per window via `__agy_hub`) untuk menyuntikkan [enhance-ide-hook.js](enhance-ide-hook.js) secara *Trusted-Types safe*, sekaligus otomatis memulihkan patch `workbench*.html`, `extensions/agy/vscode/extension.js`, dan checksum `product.json` setelah pembaruan IDE.
 - **Strict Containment:** Memanggil biner native `agy -p` dengan `toolPermission: "strict"` dan `permissions.deny` untuk seluruh kelas tool.
+
+## Pratinjau Antarmuka
+
+<p align="center">
+  <img src="assets/quick-settings-preview.svg" alt="Pratinjau Chat Composer dan Quick Settings Popover" width="100%" />
+</p>
+
+Tombol **`✦` Enhance** dan **`⚙` Quick Settings** menyatu langsung di sebelah tombol **Send (`→`)** dengan preservasi chip `@mentions` serta tombol **Undo** instan.
+
+## Cara Kerja
+
+<p align="center">
+  <img src="assets/workflow-overview.svg" alt="Alur Kerja Loopback Proxy dan Strict Prompt Enhancement" width="100%" />
+</p>
 
 ## Prasyarat
 

@@ -18,3 +18,7 @@ verify-contracts.mjs
 .githooks/
 .github/
 AGENTS.md
+assets/banner.svg
+assets/social-preview.png
+assets/workflow-overview.svg
+assets/quick-settings-preview.svg

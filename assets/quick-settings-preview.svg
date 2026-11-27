@@ -1,0 +1,116 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 420" width="1200" height="420" role="img" aria-label="Quick Settings and Chat Composer Preview">
+  <defs>
+    <linearGradient id="qsBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0b1120"/>
+      <stop offset="100%" stop-color="#111c38"/>
+    </linearGradient>
+    <linearGradient id="qsGold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fde047"/>
+      <stop offset="100%" stop-color="#f59e0b"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="2" y="2" width="1196" height="416" rx="18" fill="url(#qsBg)" stroke="#334155" stroke-width="2"/>
+
+  <!-- Left Panel: Chat Input + Enhanced Result -->
+  <g transform="translate(36, 32)" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Ubuntu, sans-serif">
+    <text x="0" y="20" fill="#94a3b8" font-size="13" font-weight="600" letter-spacing="0.6">CHAT COMPOSER (IN-PLACE ENHANCE)</text>
+
+    <rect x="0" y="34" width="660" height="324" rx="14" fill="#0f172a" stroke="#334155" stroke-width="1.5"/>
+
+    <!-- Draft Before Pill -->
+    <g transform="translate(20, 54)">
+      <rect x="0" y="0" width="620" height="54" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+      <text x="14" y="20" fill="#94a3b8" font-size="11.5" font-weight="700">RAW DRAFT</text>
+      <text x="14" y="40" fill="#cbd5e1" font-size="13">"perbaiki bug proxy di @extension.js dan tambah test"</text>
+    </g>
+
+    <!-- Arrow Down -->
+    <text x="330" y="130" text-anchor="middle" fill="#fbbf24" font-size="14" font-weight="700">Enhanced in 1.2s  (Ctrl+Alt+E / Klik Enhance)</text>
+
+    <!-- Enhanced Prompt Box -->
+    <g transform="translate(20, 144)">
+      <rect x="0" y="0" width="620" height="140" rx="10" fill="#020617" stroke="#3b82f6" stroke-width="1.5"/>
+      <text x="16" y="26" fill="#f8fafc" font-size="13.5" font-weight="600">Audit dan perbaiki failover proxy loopback di</text>
+      <rect x="310" y="10" width="116" height="22" rx="6" fill="#1e3a8a" stroke="#3b82f6" stroke-width="1"/>
+      <text x="368" y="25" text-anchor="middle" fill="#93c5fd" font-family="'JetBrains Mono', ui-monospace, monospace" font-size="11.5" font-weight="600">@extension.js</text>
+      <text x="16" y="54" fill="#cbd5e1" font-size="13">• Tangani ECONNREFUSED saat hub restart tanpa menimpa port aktif.</text>
+      <text x="16" y="76" fill="#cbd5e1" font-size="13">• Pertahankan validasi origin, token check, dan tanda tangan HMAC.</text>
+      <text x="16" y="98" fill="#cbd5e1" font-size="13">• Tambahkan unit test HTTP + WebSocket failover lalu jalankan npm run verify.</text>
+      <rect x="16" y="110" width="154" height="20" rx="5" fill="#1e293b" stroke="#475569" stroke-width="1"/>
+      <text x="93" y="124" text-anchor="middle" fill="#94a3b8" font-family="system-ui, sans-serif" font-size="11">@mentions &amp; chips utuh</text>
+    </g>
+
+    <!-- Bottom Action Bar -->
+    <g transform="translate(20, 300)">
+      <rect x="0" y="4" width="210" height="28" rx="14" fill="#064e3b" stroke="#10b981" stroke-width="1"/>
+      <text x="14" y="22" fill="#a7f3d0" font-size="12" font-weight="600">Enhanced · +31 words</text>
+      <rect x="156" y="8" width="46" height="20" rx="10" fill="#047857"/>
+      <text x="179" y="22" text-anchor="middle" fill="#ecfdf5" font-size="11" font-weight="700">Undo</text>
+
+      <!-- Buttons -->
+      <rect x="494" y="0" width="38" height="34" rx="8" fill="#1e293b" stroke="#f59e0b" stroke-width="1.5"/>
+      <path d="M513 8 C514 14, 515.5 15.5, 521.5 16.5 C515.5 17.5, 514 19, 513 25 C512 19, 510.5 17.5, 504.5 16.5 C510.5 15.5, 512 14, 513 8 Z" fill="#facc15"/>
+
+      <rect x="538" y="0" width="34" height="34" rx="8" fill="#1e293b" stroke="#60a5fa" stroke-width="1.5"/>
+      <circle cx="555" cy="17" r="5" fill="none" stroke="#93c5fd" stroke-width="2"/>
+
+      <rect x="578" y="0" width="42" height="34" rx="8" fill="#2563eb"/>
+      <path d="M593 17 L606 17 M601 12 L606 17 L601 22" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+  </g>
+
+  <!-- Right Panel: Quick Settings Popover -->
+  <g transform="translate(724, 32)" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Ubuntu, sans-serif">
+    <text x="0" y="20" fill="#94a3b8" font-size="13" font-weight="600" letter-spacing="0.6">QUICK SETTINGS POPOVER</text>
+
+    <rect x="0" y="34" width="440" height="324" rx="14" fill="#0f172a" stroke="#475569" stroke-width="1.5"/>
+
+    <!-- Popover Header -->
+    <text x="20" y="64" fill="#f8fafc" font-size="15" font-weight="700">Prompt Enhancer Settings</text>
+    <rect x="336" y="47" width="84" height="22" rx="11" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+    <text x="378" y="62" text-anchor="middle" fill="#fbbf24" font-size="11" font-weight="600">By Kyuzan0</text>
+    <line x1="20" y1="78" x2="420" y2="78" stroke="#1e293b" stroke-width="1.5"/>
+
+    <!-- Row 1: Enable Shortcut -->
+    <text x="20" y="104" fill="#e2e8f0" font-size="13">Enable Shortcut</text>
+    <rect x="382" y="90" width="38" height="20" rx="10" fill="#2563eb"/>
+    <circle cx="409" cy="100" r="7" fill="#ffffff"/>
+
+    <!-- Row 2: Shortcut -->
+    <text x="20" y="138" fill="#e2e8f0" font-size="13">Shortcut</text>
+    <rect x="242" y="120" width="114" height="26" rx="6" fill="#1e293b" stroke="#475569" stroke-width="1"/>
+    <text x="299" y="137" text-anchor="middle" fill="#f8fafc" font-family="'JetBrains Mono', ui-monospace, monospace" font-size="12">Ctrl+Alt+E</text>
+    <rect x="362" y="120" width="58" height="26" rx="6" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+    <text x="391" y="137" text-anchor="middle" fill="#94a3b8" font-size="11.5">Reset</text>
+
+    <!-- Row 3: Output Language -->
+    <text x="20" y="174" fill="#e2e8f0" font-size="13">Output Language</text>
+    <rect x="242" y="156" width="178" height="26" rx="6" fill="#1e293b" stroke="#475569" stroke-width="1"/>
+    <text x="254" y="173" fill="#f8fafc" font-size="12.5">Auto (Preserve Draft)</text>
+    <text x="406" y="173" fill="#94a3b8" font-size="11">▾</text>
+
+    <!-- Row 4: Detail Level -->
+    <text x="20" y="210" fill="#e2e8f0" font-size="13">Detail Level</text>
+    <rect x="242" y="192" width="178" height="26" rx="6" fill="#1e293b" stroke="#475569" stroke-width="1"/>
+    <text x="254" y="209" fill="#f8fafc" font-size="12.5">Balanced</text>
+    <text x="406" y="209" fill="#94a3b8" font-size="11">▾</text>
+
+    <!-- Row 5: Preset Mode -->
+    <text x="20" y="246" fill="#e2e8f0" font-size="13">Preset Mode</text>
+    <rect x="242" y="228" width="178" height="26" rx="6" fill="#1e293b" stroke="#475569" stroke-width="1"/>
+    <text x="254" y="245" fill="#f8fafc" font-size="12.5">General / Debug / Refactor</text>
+    <text x="406" y="245" fill="#94a3b8" font-size="11">▾</text>
+
+    <!-- Collapsible Section Headers -->
+    <rect x="20" y="268" width="400" height="26" rx="6" fill="#1e293b"/>
+    <text x="32" y="285" fill="#94a3b8" font-size="12" font-weight="600">▸ Enhancement  (Custom Instructions)</text>
+
+    <rect x="20" y="300" width="400" height="26" rx="6" fill="#1e293b"/>
+    <text x="32" y="317" fill="#94a3b8" font-size="12" font-weight="600">▸ Context &amp; Feedback  (Workspace · Thread · Toast)</text>
+
+    <!-- Footer -->
+    <text x="20" y="346" fill="#60a5fa" font-size="12" font-weight="600">Undo Last</text>
+    <text x="420" y="346" text-anchor="end" fill="#60a5fa" font-size="12" font-weight="600">Open IDE Settings ↗</text>
+  </g>
+</svg>
